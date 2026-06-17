@@ -1,0 +1,74 @@
+{
+  "name": "ink-wasm",
+  "version": "1.0.0",
+  "description": "Google Ink (freehand stroke generation) compiled to WebAssembly, with TypeScript types and Canvas2D / CanvasKit (Skia) rendering backends.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "playforge-coding",
+  "homepage": "https://github.com/playforge-coding/ink-wasm#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/playforge-coding/ink-wasm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/playforge-coding/ink-wasm/issues"
+  },
+  "keywords": [
+    "ink",
+    "google-ink",
+    "wasm",
+    "webassembly",
+    "stroke",
+    "freehand",
+    "handwriting",
+    "drawing",
+    "stylus",
+    "canvas",
+    "canvaskit",
+    "skia",
+    "mesh"
+  ],
+  "main": "./dist/ink.mjs",
+  "module": "./dist/ink.mjs",
+  "types": "./dist/ink.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/ink.d.ts",
+      "import": "./dist/ink.mjs",
+      "default": "./dist/ink.mjs"
+    },
+    "./renderer": {
+      "types": "./src/ink-renderer.d.ts",
+      "import": "./src/ink-renderer.mjs",
+      "default": "./src/ink-renderer.mjs"
+    },
+    "./ink.wasm": "./dist/ink.wasm",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "wasm-src",
+    "examples",
+    "setup.js",
+    "build.js",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "pnpm@11.5.2",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "setup": "node setup.js",
+    "build": "node build.js",
+    "all": "node setup.js && node build.js",
+    "test": "node examples/node-test.mjs",
+    "serve": "pnpm dlx serve .",
+    "prepublishOnly": "node -e \"const fs=require('fs');for(const f of ['dist/ink.mjs','dist/ink.wasm','dist/ink.d.ts'])fs.accessSync(f);console.log('dist artifacts present')\""
+  }
+}

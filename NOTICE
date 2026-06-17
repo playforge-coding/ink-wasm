@@ -1,0 +1,17 @@
+ink-wasm
+Copyright 2026 playforge-coding
+
+This product packages a WebAssembly build of Google Ink and ships it in
+dist/ink.wasm (with the Emscripten loader dist/ink.mjs).
+
+Google Ink
+  https://github.com/google/ink
+  Copyright Google LLC
+  Licensed under the Apache License, Version 2.0.
+
+The compiled dist/ink.wasm binary embeds Google Ink together with its
+transitive dependencies (including Abseil and protobuf), each distributed
+under their respective licenses. The Embind bindings (wasm-src/bindings.cc),
+the Bazel staging in wasm-src/, the build scripts (setup.js, build.js), and
+the JavaScript rendering backends (src/) are authored by playforge-coding and
+licensed under the Apache License, Version 2.0 (see LICENSE).

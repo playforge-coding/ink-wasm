@@ -1,0 +1,98 @@
+<!doctype html>
+<!--
+  Browser demo: draw with the mouse; Google Ink generates the stroke mesh in
+  wasm and we render it with CanvasKit (Skia compiled to WebAssembly) using
+  Skia's antialiased GPU drawVertices.
+
+  Serve from the repo root (needs ../dist/ink.mjs + ink.wasm and
+  ../src/ink-renderer.mjs), e.g.:  npx serve .  then open /examples/canvaskit.html
+-->
+<meta charset="utf-8" />
+<title>Google Ink — CanvasKit (Skia) backend</title>
+<style>
+  body {
+    font: 14px system-ui;
+    margin: 20px;
+  }
+  canvas {
+    border: 1px solid #ccc;
+    touch-action: none;
+    cursor: crosshair;
+  }
+</style>
+<h1>Google Ink + CanvasKit (Skia/wasm)</h1>
+<p id="status">loading wasm…</p>
+<canvas id="c" width="800" height="500"></canvas>
+
+<!-- CanvasKit (Skia compiled to wasm). Exposes the global `CanvasKitInit`. -->
+<script src="https://unpkg.com/canvaskit-wasm@0.39.1/bin/canvaskit.js"></script>
+<script type="module">
+  import createInkModule from "../dist/ink.mjs";
+  import { createCanvasKitBackend } from "../src/ink-renderer.mjs";
+
+  const status = document.getElementById("status");
+  const canvas = document.getElementById("c");
+
+  // Load Google Ink (stroke engine) and CanvasKit (renderer) in parallel.
+  const [ink, CanvasKit] = await Promise.all([
+    createInkModule(),
+    CanvasKitInit({
+      locateFile: (f) => `https://unpkg.com/canvaskit-wasm@0.39.1/bin/${f}`,
+    }),
+  ]);
+
+  const backend = createCanvasKitBackend(CanvasKit, canvas, {
+    background: CanvasKit.WHITE,
+  });
+  status.textContent = ink.version() + " — drawing via CanvasKit/Skia";
+
+  const STROKE_COLOR = { r: 0.1, g: 0.4, b: 0.9, a: 0.85 };
+
+  let points = [];
+  let t0 = 0;
+  let drawing = false;
+
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  function redraw() {
+    if (points.length < 2) return;
+    const mesh = ink.generateStrokeMesh(
+      points,
+      "pressure_pen",
+      STROKE_COLOR.r,
+      STROKE_COLOR.g,
+      STROKE_COLOR.b,
+      STROKE_COLOR.a,
+      6,
+      0.1,
+    );
+    if (!mesh) return;
+    backend.clear();
+    backend.drawMesh(mesh, STROKE_COLOR);
+    backend.present();
+    status.textContent = `${mesh.vertexCount} vertices, ${mesh.triangleCount} triangles (CanvasKit/Skia)`;
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    drawing = true;
+    points = [];
+    t0 = performance.now();
+    const p = pos(e);
+    points.push({ x: p.x, y: p.y, t: 0, pressure: e.pressure || 0.5 });
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!drawing) return;
+    const p = pos(e);
+    points.push({
+      x: p.x,
+      y: p.y,
+      t: (performance.now() - t0) / 1000,
+      pressure: e.pressure || 0.5,
+    });
+    redraw();
+  });
+  window.addEventListener("pointerup", () => (drawing = false));
+</script>

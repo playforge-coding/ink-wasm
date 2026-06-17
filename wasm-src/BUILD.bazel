@@ -1,0 +1,47 @@
+# WebAssembly build target for Google Ink.
+#
+# This package is staged into the cloned ink repo at //wasm by setup.js.
+# `ink` is an ordinary cc_binary that links the core ink libraries together
+# with our Embind glue; `wasm_cc_binary` transitions that target (and all of
+# its transitive deps) onto the emscripten toolchain and emits the .js/.wasm.
+
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@emsdk//emscripten_toolchain:wasm_rules.bzl", "wasm_cc_binary")
+
+package(default_visibility = ["//visibility:public"])
+
+cc_binary(
+    name = "ink",
+    srcs = ["bindings.cc"],
+    linkopts = [
+        "-lembind",
+        "-O3",
+        "--no-entry",
+        "-sMODULARIZE=1",
+        "-sEXPORT_ES6=1",
+        "-sEXPORT_NAME=createInkModule",
+        "-sALLOW_MEMORY_GROWTH=1",
+        "-sENVIRONMENT=web,worker,node",
+        "-sFILESYSTEM=0",
+    ],
+    deps = [
+        "//ink/brush",
+        "//ink/brush:brush_family",
+        "//ink/brush:stock_brushes",
+        "//ink/color",
+        "//ink/geometry:mesh",
+        "//ink/geometry:partitioned_mesh",
+        "//ink/geometry:point",
+        "//ink/strokes:stroke",
+        "//ink/strokes/input:stroke_input",
+        "//ink/strokes/input:stroke_input_batch",
+        "//ink/types:duration",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/types:span",
+    ],
+)
+
+wasm_cc_binary(
+    name = "ink_wasm",
+    cc_target = ":ink",
+)
