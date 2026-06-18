@@ -1,17 +1,17 @@
-// Loads the compiled ink wasm module in Node and runs the real stroke pipeline.
+// Loads the bundled ink wasm package in Node and runs the real stroke pipeline.
 //   node examples/node-test.mjs
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 
 const dist = join(
   dirname(fileURLToPath(import.meta.url)),
   "..",
   "dist",
-  "ink.mjs",
+  "index.js",
 );
-const { default: createInkModule } = await import(dist);
+const { createInk } = await import(pathToFileURL(dist).href);
 
-const ink = await createInkModule();
+const ink = await createInk();
 console.log(ink.version());
 
 // A short curved stroke: x, y, t (seconds), optional pressure.

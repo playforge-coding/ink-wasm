@@ -2,8 +2,8 @@
 <!--
   Browser demo: draw with the mouse; Google Ink generates the stroke mesh in
   wasm and we render the triangles on a 2D canvas.
-  Serve from the repo root (needs ../dist/ink.mjs + ink.wasm and
-  ../src/ink-renderer.mjs), e.g.:  npx serve .  then open /examples/index.html
+  Run `pnpm serve` (copies the built dist/ into examples/ and serves it),
+  then open /index.html.
 
   For the Skia/GPU renderer instead, see canvaskit.html.
 -->
@@ -26,10 +26,9 @@
 <canvas id="c" width="800" height="500"></canvas>
 
 <script type="module">
-  import createInkModule from "../dist/ink.mjs";
-  import { createCanvas2dBackend } from "../src/ink-renderer.mjs";
+  import { createInk, createCanvas2dBackend } from "./dist/index.js";
 
-  const ink = await createInkModule();
+  const ink = await createInk();
   const status = document.getElementById("status");
   status.textContent = ink.version() + " — draw on the canvas";
 

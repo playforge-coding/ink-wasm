@@ -1,9 +1,13 @@
-// TypeScript declarations for the Google Ink WebAssembly module.
+// Typed, ergonomic wrapper around the Google Ink WebAssembly module.
 //
-// This describes the Embind surface defined in wasm-src/bindings.cc. The build
-// (scripts/build-wasm.mjs) ships it alongside the emitted glue as
-// wasm-build/ink.d.ts, so the src/ wrappers type their
-// `import createInkModule from "../wasm-build/ink.js"` against the real API.
+// The Emscripten glue (../wasm-build/ink.js) and its .wasm are bundled in by
+// Rslib; the public API surface is declared here so the emitted declarations
+// stay self-contained (they must not reference ../wasm-build, which ships only
+// inside the bundle).
+import createInkModule from "../wasm-build/ink.js";
+import { defaultLocateFile, type InitOptions } from "./locate.js";
+
+export type { InitOptions };
 
 /** A built-in stock brush family. */
 export type BrushName = "marker" | "pressure_pen" | "highlighter";
@@ -35,7 +39,7 @@ export interface StrokeInputPoint {
 }
 
 /** The instantiated Ink wasm module. */
-export interface InkModule {
+export interface Ink {
   /** Smoke-test string confirming the module loaded and the pipeline links. */
   version(): string;
 
@@ -62,18 +66,14 @@ export interface InkModule {
   ): StrokeMesh | null;
 }
 
-/** Options forwarded to the underlying Emscripten module factory. */
-export interface InkModuleOptions {
-  locateFile?: (path: string, prefix: string) => string;
-  print?: (text: string) => void;
-  printErr?: (text: string) => void;
-  [key: string]: unknown;
-}
-
 /**
- * Instantiates the Ink WebAssembly module. The wasm is fetched/loaded lazily;
- * await the returned promise before calling any methods.
+ * Instantiate the Ink WebAssembly module and return the typed API. The wasm is
+ * loaded lazily; await the returned promise before calling any methods. The
+ * returned object is reusable across many calls.
  */
-export default function createInkModule(
-  options?: InkModuleOptions,
-): Promise<InkModule>;
+export function createInk(options: InitOptions = {}): Promise<Ink> {
+  return createInkModule({
+    wasmBinary: options.wasmBinary,
+    locateFile: options.locateFile ?? defaultLocateFile,
+  }) as Promise<Ink>;
+}

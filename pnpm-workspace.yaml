@@ -1,0 +1,6 @@
+# pnpm 11 reads these settings here (not from package.json / .npmrc).
+# core-js ships an optional postinstall build we don't need.
+allowBuilds:
+  core-js: false
+# Don't re-run `install` before every `pnpm <script>`.
+verifyDepsBeforeRun: false

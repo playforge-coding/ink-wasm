@@ -12,9 +12,8 @@
   its own cached mesh and color — and redraw the whole stack every frame, with
   the in-progress stroke on top. Undo pops the stack; clear empties it.
 
-  Serve from the repo root (needs ../dist/ink.mjs + ink.wasm and
-  ../src/ink-renderer.mjs), e.g.:  pnpm serve   then open
-  http://localhost:3000/examples/paint.html
+  Run `pnpm serve` (copies the built dist/ into examples/ and serves it),
+  then open http://localhost:3000/paint.html
 -->
 <html lang="en">
   <head>
@@ -277,8 +276,7 @@
     </div>
 
     <script type="module">
-      import createInkModule from "../dist/ink.mjs";
-      import { createCanvas2dBackend } from "../src/ink-renderer.mjs";
+      import { createInk, createCanvas2dBackend } from "./dist/index.js";
 
       // --- State -------------------------------------------------------------
       const PALETTE = [
@@ -530,7 +528,7 @@
       buildBrushes();
       updatePreview();
 
-      ink = await createInkModule();
+      ink = await createInk();
       backend = createCanvas2dBackend(canvas);
       render();
       status.textContent = `${ink.version()} — pick a color and draw`;

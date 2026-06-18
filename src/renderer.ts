@@ -1,32 +1,46 @@
 // Rendering backends for Google Ink stroke meshes.
 //
-// `generateStrokeMesh` (from dist/ink.mjs) returns GPU-ready geometry:
-//   { vertices: Float32Array /* x,y pairs */, indices: Uint32Array, ... }
+// `createInk().generateStrokeMesh` (from "./ink.js") returns GPU-ready
+// geometry: { vertices: Float32Array /* x,y pairs */, indices: Uint32Array }.
 //
 // This module turns that geometry into pixels. Every backend implements the
-// same small interface so callers can swap renderers without touching their
-// input/stroke logic:
-//
-//   interface InkBackend {
-//     clear(): void;                          // erase the frame
-//     drawMesh(mesh, color): void;            // color = { r, g, b, a } in 0..1
-//     present(): void;                        // flush (no-op for Canvas2D)
-//     dispose(): void;                         // release native resources
-//   }
-//
-// Two backends are provided:
+// same small InkBackend interface so callers can swap renderers without
+// touching their input/stroke logic. Two backends are provided:
 //   - createCanvas2dBackend  — fills triangles on a 2D canvas (zero deps).
 //   - createCanvasKitBackend — draws via CanvasKit (Skia compiled to wasm),
 //     using Skia's antialiased GPU `drawVertices`, the same renderer Google
 //     Ink itself targets natively.
+import type { StrokeMesh } from "./ink.js";
+
+/** RGBA color, each component in 0..1. */
+export interface InkColor {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
+/**
+ * A rendering backend. Implementations turn a {@link StrokeMesh} into pixels;
+ * the interface is identical across Canvas2D and CanvasKit so callers can swap
+ * renderers freely.
+ */
+export interface InkBackend {
+  /** Erase the current frame. */
+  clear(): void;
+  /** Draw a stroke mesh in the given color. */
+  drawMesh(mesh: StrokeMesh, color: InkColor): void;
+  /** Flush pending GPU work to the canvas (no-op for Canvas2D). */
+  present(): void;
+  /** Release any native resources held by the backend. */
+  dispose(): void;
+}
 
 /**
  * Canvas2D backend: fills each mesh triangle as a path. Simple and dependency
  * free, but unantialiased at triangle seams.
- *
- * @param {HTMLCanvasElement} canvas
  */
-export function createCanvas2dBackend(canvas) {
+export function createCanvas2dBackend(canvas: HTMLCanvasElement): InkBackend {
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas2D: getContext('2d') returned null");
 
@@ -57,6 +71,15 @@ export function createCanvas2dBackend(canvas) {
   };
 }
 
+export interface CanvasKitBackendOptions {
+  /** Clear color (CanvasKit Float32Array color); defaults to transparent. */
+  background?: Float32Array;
+  /** Pre-made CanvasKit surface; if omitted one is created for the canvas. */
+  surface?: { getCanvas(): unknown; flush(): void; delete(): void };
+  /** Antialias the fill; defaults to true. */
+  antialias?: boolean;
+}
+
 /**
  * CanvasKit (Skia-wasm) backend.
  *
@@ -69,12 +92,16 @@ export function createCanvas2dBackend(canvas) {
  *
  * or with the npm package: `import CanvasKitInit from "canvaskit-wasm"`.
  *
- * @param {import("canvaskit-wasm").CanvasKit} CanvasKit  initialized instance
- * @param {HTMLCanvasElement} canvas
- * @param {{ background?: Float32Array, surface?: object, antialias?: boolean }} [opts]
- *        background defaults to transparent; antialias defaults to true.
+ * @param CanvasKit An already-initialized CanvasKit instance.
+ * @param canvas    The target canvas element.
  */
-export function createCanvasKitBackend(CanvasKit, canvas, opts = {}) {
+export function createCanvasKitBackend(
+  // CanvasKit's own types are optional (npm: canvaskit-wasm); keep this loose
+  // so consumers aren't forced to install them.
+  CanvasKit: any,
+  canvas: HTMLCanvasElement,
+  opts: CanvasKitBackendOptions = {},
+): InkBackend {
   // Prefer a GPU (WebGL) surface; fall back to the software rasterizer.
   const surface =
     opts.surface ??

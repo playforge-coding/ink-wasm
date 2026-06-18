@@ -1,7 +1,7 @@
 {
   "name": "ink-wasm",
   "version": "0.1.0",
-  "description": "Google Ink (freehand stroke generation) compiled to WebAssembly, with TypeScript types and Canvas2D / CanvasKit (Skia) rendering backends.",
+  "description": "Google Ink (freehand stroke generation) compiled to WebAssembly, bundled with Rslib, with TypeScript types and Canvas2D / CanvasKit (Skia) rendering backends.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "playforge-coding",
@@ -28,34 +28,22 @@
     "skia",
     "mesh"
   ],
-  "main": "./dist/ink.mjs",
-  "module": "./dist/ink.mjs",
-  "types": "./dist/ink.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/ink.d.ts",
-      "import": "./dist/ink.mjs",
-      "default": "./dist/ink.mjs"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./renderer": {
-      "types": "./src/ink-renderer.d.ts",
-      "import": "./src/ink-renderer.mjs",
-      "default": "./src/ink-renderer.mjs"
+      "types": "./dist/renderer.d.ts",
+      "import": "./dist/renderer.js"
     },
     "./ink.wasm": "./dist/ink.wasm",
     "./package.json": "./package.json"
   },
   "files": [
-    "dist",
-    "src",
-    "wasm-src",
-    "examples",
-    "setup.js",
-    "build.js",
-    "README.md",
-    "LICENSE",
-    "NOTICE"
+    "dist"
   ],
+  "sideEffects": false,
   "engines": {
     "node": ">=18"
   },
@@ -64,11 +52,18 @@
     "access": "public"
   },
   "scripts": {
-    "setup": "node setup.js",
-    "build": "node build.js",
-    "all": "node setup.js && node build.js",
-    "test": "node examples/node-test.mjs",
-    "serve": "pnpm dlx serve .",
-    "prepublishOnly": "node -e \"const fs=require('fs');for(const f of ['dist/ink.mjs','dist/ink.wasm','dist/ink.d.ts'])fs.accessSync(f);console.log('dist artifacts present')\""
+    "setup": "node scripts/setup.mjs",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build:js": "rslib build",
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/test.mjs",
+    "serve": "cd examples && cp -r ../dist ./ && pnpm dlx serve",
+    "clean": "node scripts/clean.mjs",
+    "prepublishOnly": "node -e \"const fs=require('fs');for(const f of ['dist/index.js','dist/index.d.ts','dist/ink.wasm'])fs.accessSync(f);console.log('dist artifacts present')\""
+  },
+  "devDependencies": {
+    "@rslib/core": "^0.18.0",
+    "@types/node": "^25.9.3",
+    "typescript": "^5.9.0"
   }
 }

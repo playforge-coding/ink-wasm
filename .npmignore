@@ -1,7 +1,0 @@
-# npm packs the `files` allowlist in package.json. This file exists so the
-# packer does NOT fall back to .gitignore (which excludes dist/ — the prebuilt
-# wasm we ship). Only list things to keep OUT of the published tarball here.
-/ink/
-node_modules/
-.gitignore
-.npmignore

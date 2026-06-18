@@ -1,3 +1,6 @@
-/ink/
-/dist/
 node_modules/
+dist/
+ink/
+wasm-build/
+examples/dist/
+*.log
