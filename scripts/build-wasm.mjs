@@ -1,8 +1,11 @@
-// build-wasm.mjs — compile Google Ink to WebAssembly and collect the glue.
+// build-wasm.mjs — compile Google Ink to WebAssembly (+ asm.js) and collect
+// the glue.
 //
-// Runs `bazel build //wasm:ink_wasm` inside the ink checkout (using the
-// emscripten toolchain registered by setup.mjs), then copies the emitted
-// .js/.wasm into ./wasm-build, where Rslib picks them up (rslib.config.ts).
+// Runs a single `bazel build` for all three wasm_cc_binary targets inside the
+// ink checkout (using the emscripten toolchain registered by setup.mjs), then
+// copies each variant's emitted .js/.wasm into its own wasm-build* directory,
+// where Rslib picks them up (rslib.config.ts). See WASM_VARIANTS in
+// common.mjs and wasm-src/BUILD.bazel for what each variant is for.
 //
 // Config via env vars:
 //   BAZEL        bazel binary to use (default: bazelisk if present, else bazel)
@@ -18,7 +21,7 @@ import {
   rmSync,
 } from "node:fs";
 import { join } from "node:path";
-import { INK_DIR, WASM_SRC, WASM_OUT, BAZEL_TARGET, pickBazel } from "./common.mjs";
+import { INK_DIR, WASM_SRC, WASM_VARIANTS, pickBazel } from "./common.mjs";
 
 function ensureSetup() {
   if (!existsSync(join(INK_DIR, "wasm", "BUILD.bazel"))) {
@@ -32,7 +35,8 @@ const COMPILATION_MODE = ["-c", "opt"];
 
 function build(bazel) {
   const extra = process.env.BAZEL_ARGS ? process.env.BAZEL_ARGS.split(" ") : [];
-  const args = ["build", ...COMPILATION_MODE, BAZEL_TARGET, ...extra];
+  const targets = WASM_VARIANTS.map((v) => v.bazelTarget);
+  const args = ["build", ...COMPILATION_MODE, ...targets, ...extra];
   console.log(`$ ${bazel} ${args.join(" ")}  (cwd: ${INK_DIR})`);
   execFileSync(bazel, args, { cwd: INK_DIR, stdio: "inherit" });
 }
@@ -48,40 +52,61 @@ function bazelBin(bazel) {
     .trim();
 }
 
-function collect(bazel) {
-  const outDir = join(bazelBin(bazel), "wasm", "ink_wasm");
+function collectVariant(bazel, variant) {
+  // The wasm_cc_binary target name (e.g. "ink_wasm_umd") is also the output
+  // subdirectory bazel emits into.
+  const targetName = variant.bazelTarget.split(":")[1];
+  const outDir = join(bazelBin(bazel), "wasm", targetName);
   if (!existsSync(outDir)) {
     throw new Error(`Expected output dir not found: ${outDir}`);
   }
-  rmSync(WASM_OUT, { recursive: true, force: true });
-  mkdirSync(WASM_OUT, { recursive: true });
+  rmSync(variant.outDir, { recursive: true, force: true });
+  mkdirSync(variant.outDir, { recursive: true });
 
   let copied = 0;
   for (const name of readdirSync(outDir)) {
     if (!/\.(js|wasm|worker\.js)$/.test(name)) continue;
     const src = join(outDir, name);
     // wasm_cc_binary always emits the full set of artifacts, several of them
-    // empty placeholders (e.g. ink.wasm.debug.wasm when not building debug).
-    // Skip zero-byte files so wasm-build only holds the real loader + wasm.
+    // empty placeholders (e.g. ink.wasm.debug.wasm when not building debug,
+    // or ink.wasm itself for the asm.js/WASM=0 legacy variant). Skip
+    // zero-byte files so each wasm-build* dir only holds real output.
     if (statSync(src).size === 0) continue;
-    const dest = join(WASM_OUT, name);
+    // Only the main glue file is renamed, to "ink.<jsExt>": our package.json
+    // is "type": "module", so a plain .js extension always parses as ESM
+    // regardless of its actual syntax — the CommonJS-shaped umd/legacy glue
+    // needs the explicit .cjs extension to be recognized as CommonJS. The
+    // .wasm (and any other sibling, e.g. .wasm.map) keeps bazel's name
+    // (e.g. "ink_umd.wasm") unchanged: that exact filename is baked into the
+    // glue at compile time as the default sibling asset to fetch, so
+    // renaming it here would just make the glue 404 looking for the old name.
+    const isMainGlue = name === `${variant.ccName}.js`;
+    const destName = isMainGlue ? `ink.${variant.jsExt}` : name;
+    const dest = join(variant.outDir, destName);
     copyFileSync(src, dest);
     const kb = (statSync(dest).size / 1024).toFixed(1);
-    console.log(`  ${name.padEnd(16)} ${kb.padStart(8)} KB`);
+    console.log(`  [${variant.name}] ${destName.padEnd(16)} ${kb.padStart(8)} KB`);
     copied++;
   }
   if (copied === 0) throw new Error(`No .js/.wasm artifacts in ${outDir}`);
 
   // Ship the TypeScript declarations for the emitted loader next to it, so the
-  // wrappers in src/ type the `import createInkModule from "../wasm-build/ink.js"`.
-  copyFileSync(join(WASM_SRC, "ink.d.ts"), join(WASM_OUT, "ink.d.ts"));
-  console.log(`  ${"ink.d.ts".padEnd(16)} ${"(types)".padStart(8)}`);
-
-  console.log(`\n✓ Wrote glue + wasm to ${WASM_OUT}`);
+  // wrappers in src/ type their `import createInkModule from "../wasm-build*/ink.*"`.
+  // The Embind API surface is identical across variants, so one .d.ts covers
+  // all; TS additionally requires a `.d.cts` twin to resolve a `.cjs` import.
+  copyFileSync(join(WASM_SRC, "ink.d.ts"), join(variant.outDir, "ink.d.ts"));
+  console.log(`  [${variant.name}] ${"ink.d.ts".padEnd(16)} ${"(types)".padStart(8)}`);
+  if (variant.jsExt === "cjs") {
+    copyFileSync(join(WASM_SRC, "ink.d.ts"), join(variant.outDir, "ink.d.cts"));
+    console.log(`  [${variant.name}] ${"ink.d.cts".padEnd(16)} ${"(types)".padStart(8)}`);
+  }
 }
 
 ensureSetup();
 const bazel = pickBazel();
 build(bazel);
-collect(bazel);
-console.log("\nNext: rslib build  (or `pnpm build:js`)");
+for (const variant of WASM_VARIANTS) {
+  collectVariant(bazel, variant);
+  console.log(`✓ Wrote ${variant.name} glue to ${variant.outDir}\n`);
+}
+console.log("Next: rslib build  (or `pnpm build:js`)");

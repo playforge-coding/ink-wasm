@@ -1,6 +1,6 @@
 {
   "name": "ink-wasm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Google Ink (freehand stroke generation) compiled to WebAssembly, bundled with Rslib, with TypeScript types and Canvas2D / CanvasKit (Skia) rendering backends.",
   "type": "module",
   "license": "Apache-2.0",
@@ -37,9 +37,15 @@
       "types": "./dist/renderer.d.ts",
       "import": "./dist/renderer.js"
     },
+    "./umd": "./dist/umd/index.js",
+    "./umd/renderer": "./dist/umd/renderer.js",
+    "./umd/ink_umd.wasm": "./dist/umd/ink_umd.wasm",
+    "./legacy": "./dist/legacy/index.js",
     "./ink.wasm": "./dist/ink.wasm",
     "./package.json": "./package.json"
   },
+  "unpkg": "./dist/umd/index.js",
+  "jsdelivr": "./dist/umd/index.js",
   "files": [
     "dist"
   ],
@@ -59,7 +65,7 @@
     "test": "node scripts/test.mjs",
     "serve": "cd examples && cp -r ../dist ./ && pnpm dlx serve",
     "clean": "node scripts/clean.mjs",
-    "prepublishOnly": "node -e \"const fs=require('fs');for(const f of ['dist/index.js','dist/index.d.ts','dist/ink.wasm'])fs.accessSync(f);console.log('dist artifacts present')\""
+    "prepublishOnly": "node -e \"const fs=require('fs');for(const f of ['dist/index.js','dist/index.d.ts','dist/ink.wasm','dist/umd/index.js','dist/umd/ink_umd.wasm','dist/legacy/index.js'])fs.accessSync(f);console.log('dist artifacts present')\""
   },
   "devDependencies": {
     "@rslib/core": "^0.18.0",

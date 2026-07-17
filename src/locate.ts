@@ -1,21 +1,18 @@
-// Default resolver for the sibling .wasm file. Emscripten calls this with the
-// bare wasm filename ("ink.wasm"); we resolve it relative to the bundle that
-// contains this code via import.meta.url. Works in browsers, web workers and
-// modern Node. For environments where that resolution fails, pass an explicit
-// `wasmBinary` or `locateFile` to createInk().
+// Default resolver for the sibling .wasm file, used by the ESM build only.
+// Emscripten calls this with the bare wasm filename ("ink.wasm"); we resolve
+// it relative to the bundle that contains this code via import.meta.url.
+// Works in browsers, web workers and modern Node. For environments where that
+// resolution fails, pass an explicit `wasmBinary` or `locateFile` to
+// createInk().
+//
+// `import.meta` is only valid inside an ES module, so this function — and
+// this file — must never be imported (even transitively at the type level by
+// value, not just `import type`) from the UMD or legacy entries (ink.umd.ts,
+// ink.legacy.ts); those rely on Emscripten's own document.currentScript-based
+// resolution instead. See wasm-src/BUILD.bazel for why those variants drop
+// EXPORT_ES6.
 export function defaultLocateFile(path: string): string {
   return new URL(path, import.meta.url).href;
 }
 
-export interface InitOptions {
-  /**
-   * Provide the WebAssembly bytes directly. Skips all URL resolution — useful
-   * in Node or when you fetch the .wasm yourself (e.g. behind a CDN).
-   */
-  wasmBinary?: ArrayBuffer | Uint8Array;
-  /**
-   * Customize how the .wasm file URL is resolved from its filename.
-   * Defaults to resolving alongside the bundle.
-   */
-  locateFile?: (path: string, scriptDirectory: string) => string;
-}
+export type { InitOptions } from "./ink-types.js";

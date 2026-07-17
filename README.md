@@ -8,8 +8,9 @@ Google Ink is a Bazel 7+/bzlmod C++20 project with no built-in JS bindings. The
 Node scripts in `scripts/` add an Emscripten toolchain to its Bazel build,
 compile the core stroke pipeline to wasm, and expose it to JavaScript via Embind.
 The TypeScript wrappers in `src/` are then bundled together with the Emscripten
-glue by [Rslib](https://lib.rsbuild.dev/) into a pure-ESM package — with
-TypeScript types and a choice of rendering backends (Canvas2D or CanvasKit/Skia).
+glue by [Rslib](https://lib.rsbuild.dev/) into three packages — ESM, UMD, and a
+wasm-free UMD fallback for legacy browsers — with TypeScript types and a choice
+of rendering backends (Canvas2D or CanvasKit/Skia).
 
 ## Install
 
@@ -56,6 +57,33 @@ Entry points:
 | `ink-wasm` | stroke engine (`createInk`) + both renderers (`dist/index.js` + `dist/ink.wasm`) | `dist/index.d.ts` |
 | `ink-wasm/renderer` | Canvas2D + CanvasKit rendering backends only, no wasm (`dist/renderer.js`) | `dist/renderer.d.ts` |
 | `ink-wasm/ink.wasm` | the raw wasm binary (for bundler URL/asset handling) | — |
+| `ink-wasm/umd` | same API as `ink-wasm`, as a UMD bundle (`dist/umd/index.js` + `dist/umd/ink_umd.wasm`) — for a plain `<script>` tag, CommonJS `require()`, or AMD, instead of ES modules | `dist/index.umd.d.ts` |
+| `ink-wasm/umd/renderer` | renderer-only UMD bundle, no wasm (`dist/umd/renderer.js`) | `dist/renderer.d.ts` |
+| `ink-wasm/legacy` | same API again, but **no WebAssembly at all** — the whole engine compiled to asm.js (`dist/legacy/index.js`, no `.wasm` sibling) — for browsers that can't run wasm | `dist/index.legacy.d.ts` |
+
+The package also sets `unpkg`/`jsdelivr` to the UMD build, so a CDN `<script>`
+tag works out of the box:
+
+```html
+<script src="https://unpkg.com/ink-wasm/dist/umd/index.js"></script>
+<script>
+  InkWasm.createInk().then((ink) => { /* ... */ });
+</script>
+```
+
+`ink-wasm/legacy` exists specifically for browsers without WebAssembly
+support: it ships the same Embind API (`createInk`, `generateStrokeMesh`,
+the renderers) but the stroke pipeline runs as plain JS (asm.js) instead of
+wasm. It's ~1.3 MB unminified-equivalent vs. ~30 KB + 580 KB wasm for the
+other builds, and noticeably slower — use it only as a fallback, e.g. behind
+an `if (!window.WebAssembly)` check:
+
+```html
+<script>
+  if (!window.WebAssembly) document.write('<script src="/dist/legacy/index.js">\x3C/script>');
+  else document.write('<script src="/dist/umd/index.js">\x3C/script>');
+</script>
+```
 
 The rest of this document covers **building the wasm from source**.
 
@@ -75,16 +103,20 @@ Emscripten itself is **downloaded by Bazel** (via the `emsdk` module) — you do
 
 ```bash
 pnpm install
-pnpm setup        # clone Google Ink, register emsdk, stage the //wasm target
-pnpm build:wasm   # bazel build -> wasm-build/ink.js + ink.wasm + ink.d.ts
-pnpm build:js     # rslib bundle -> dist/index.js + dist/renderer.js + dist/ink.wasm
-pnpm test         # run the pipeline in Node against the built bundle
+pnpm setup        # clone Google Ink, register emsdk, stage the //wasm targets
+pnpm build:wasm   # bazel build -> wasm-build*/ink.{js,cjs} + .wasm + .d.ts (x3 variants)
+pnpm build:js     # rslib bundle -> dist/, dist/umd/, dist/legacy/
+pnpm test         # run the pipeline in Node against the built ESM bundle
 ```
 
 `pnpm build` runs all three build steps in order (cloning + patching ink first
 if needed). The first build downloads the Emscripten toolchain plus the
 abseil/protobuf dependency tree, so it takes a while; subsequent builds are
-incremental. `pnpm clean` removes `dist/`, `wasm-build/` and the `ink/` checkout.
+incremental — `build:wasm` compiles three variants (ESM, UMD, wasm-free
+legacy) from the same C++ source in one `bazel build` invocation, sharing
+cached compilation of the ink/abseil/skia dependency tree, so adding the UMD
+and legacy variants costs one extra link step each, not a full rebuild.
+`pnpm clean` removes `dist/`, all `wasm-build*/` dirs and the `ink/` checkout.
 
 ### Browser demo
 
@@ -115,24 +147,55 @@ Env: `INK_REF` (default `main`), `EMSDK_VERSION` (default `5.0.7`),
 `BAZEL_VERSION` (default `7.4.1`).
 
 ### `scripts/build-wasm.mjs`
-1. Runs `bazel build -c opt //wasm:ink_wasm` inside `./ink`.
-2. Copies the emitted `.js`/`.wasm` from `bazel-bin` into `./wasm-build`.
-3. Copies the TypeScript declarations to `wasm-build/ink.d.ts`.
+1. Runs a single `bazel build -c opt //wasm:ink_wasm //wasm:ink_wasm_umd //wasm:ink_wasm_legacy`
+   inside `./ink`.
+2. For each of the three variants, copies its emitted `.js`/`.wasm` from
+   `bazel-bin` into its own `./wasm-build*` directory, normalizing the main
+   glue file to `ink.js` (ESM) or `ink.cjs` (UMD/legacy — see "How it builds").
+3. Copies the TypeScript declarations (`wasm-src/ink.d.ts`, identical across
+   variants) alongside each as `ink.d.ts` (+ `ink.d.cts` for the `.cjs` ones).
 
 Env: `BAZEL` (binary to use), `BAZEL_ARGS` (extra Bazel flags).
 
 ### `rslib build` (`rslib.config.ts`)
-Bundles the `src/` wrappers together with the Emscripten glue they import into
-`dist/index.js` and `dist/renderer.js`, emits declaration files, and copies
-`wasm-build/ink.wasm` to `dist/ink.wasm` alongside them.
+Three `lib` entries, one per bundle:
+- **esm** — bundles `src/index.ts` + `src/renderer.ts` with the ESM glue into
+  `dist/index.js` + `dist/renderer.js`, emits declaration files, and copies
+  `wasm-build/ink.wasm` alongside.
+- **umd** — same API (`src/index.umd.ts` + `src/renderer.ts`) bundled as UMD
+  (`umdName: "InkWasm"`) into `dist/umd/`, with the UMD glue's `.wasm` copied
+  alongside under its own name (`dist/umd/ink_umd.wasm`).
+- **legacy** — `src/index.legacy.ts` (asm.js glue, no wasm) bundled as UMD
+  into `dist/legacy/index.js`, downleveled to `es5`.
 
 ## How it builds
 
-`wasm-src/BUILD.bazel` defines a normal `cc_binary` (`//wasm:ink`) that links the
+`wasm-src/BUILD.bazel` defines three `cc_binary` targets, all linking the same
 core Ink libraries (`strokes`, `brush`, `geometry`, `color`, `types`) with the
-Embind glue in `wasm-src/bindings.cc`. The `wasm_cc_binary` rule from the
-`emsdk` module transitions that target — and its entire transitive dependency
-graph — onto the Emscripten toolchain and emits the `.js`/`.wasm`.
+Embind glue in `wasm-src/bindings.cc`, differing only in Emscripten flags:
+
+| Target | Flags | Used by |
+| --- | --- | --- |
+| `ink` | `EXPORT_ES6=1`, `ENVIRONMENT=web,worker,node` | ESM bundle |
+| `ink_umd` | no `EXPORT_ES6`, `ENVIRONMENT=web,worker` | UMD bundle |
+| `ink_legacy` | same as `ink_umd`, plus `WASM=0` (asm.js) | legacy (no-wasm) bundle |
+
+`EXPORT_ES6` controls whether the glue is an ES module (`import.meta.url`-based
+wasm resolution — required for the ESM bundle) or a classic-script/CommonJS
+module (`document.currentScript`-based resolution). `import.meta` is a syntax
+error outside ES modules, so the UMD and legacy bundles **must** use the
+non-ES6 glue — that's also why their glue is shipped as `ink.cjs`, not
+`ink.js`: this package is `"type": "module"`, so a plain `.js` extension
+would be parsed as ESM regardless of its actual CommonJS syntax. `WASM=0`
+additionally makes Emscripten compile straight to asm.js instead of
+WebAssembly, so `ink_legacy`'s glue is fully self-contained JS with no `.wasm`
+output at all. The wasm bytecode itself is unaffected by `EXPORT_ES6`/
+`ENVIRONMENT` (confirmed: `ink.wasm` and `ink_umd.wasm` are byte-identical in
+size), so only the JS wrapper differs between the ESM and UMD builds.
+
+The `wasm_cc_binary` rule from the `emsdk` module transitions each target —
+and its entire transitive dependency graph — onto the Emscripten toolchain and
+emits the `.js`/`.wasm`.
 
 Only the **stroke-geometry core** is compiled into wasm: the input → brush →
 stroke → mesh pipeline, which produces GPU-ready vertex/index buffers directly.
@@ -197,27 +260,36 @@ CDN (`examples/canvaskit.html` shows the CDN path).
 ```
 scripts/
   setup.mjs           # clone + patch the ink checkout
-  build-wasm.mjs      # bazel build -> wasm-build/ (glue + .wasm + .d.ts)
+  build-wasm.mjs      # bazel build -> wasm-build*/ (glue + .wasm + .d.ts, x3)
   build.mjs           # setup (if needed) -> build-wasm -> rslib build
-  common.mjs          # shared paths + helpers
+  common.mjs          # shared paths + helpers (incl. WASM_VARIANTS)
   clean.mjs
   test.mjs
-rslib.config.ts       # bundles src/ + glue into dist/, copies the .wasm
+rslib.config.ts       # 3 lib entries (esm/umd/legacy) -> dist/, dist/umd/, dist/legacy/
 wasm-src/             # the Bazel package staged into ink/wasm
-  BUILD.bazel
+  BUILD.bazel         # 3 cc_binary targets: ink, ink_umd, ink_legacy
   bindings.cc         # Embind bindings over the Ink stroke pipeline
-  ink.d.ts            # TypeScript declarations for the emitted glue
+  ink.d.ts            # TypeScript declarations for the emitted glue (all 3 variants)
 src/
-  index.ts            # public entry: createInk + renderers
-  ink.ts              # typed wrapper around the wasm module
+  index.ts            # ESM public entry: createInk + renderers
+  index.umd.ts        # same API, UMD entry (wasm-backed)
+  index.legacy.ts     # same API, UMD entry (asm.js, no wasm)
+  ink.ts              # typed wrapper around the ESM wasm module
+  ink.umd.ts          # typed wrapper around the UMD wasm module
+  ink.legacy.ts       # typed wrapper around the asm.js module
+  ink-types.ts        # shared types (Ink, StrokeMesh, InitOptions, ...)
   renderer.ts         # Canvas2D + CanvasKit (Skia) rendering backends
-  locate.ts           # default wasm URL resolution + InitOptions
+  locate.ts           # ESM-only default wasm URL resolution (import.meta.url)
 examples/
   node-test.mjs       # Node smoke test
   index.html          # browser drawing demo (Canvas2D)
   canvaskit.html      # browser drawing demo (CanvasKit / Skia)
   paint.html          # fuller paint app demo (Canvas2D)
 ink/                  # cloned Google Ink (gitignored)
-wasm-build/           # collected Emscripten glue + .wasm + d.ts (gitignored)
-dist/                 # bundle: index.js + renderer.js + ink.wasm + d.ts (gitignored)
+wasm-build/           # ESM Emscripten glue + .wasm + d.ts (gitignored)
+wasm-build-umd/       # UMD Emscripten glue + .wasm + d.ts (gitignored)
+wasm-build-legacy/    # asm.js Emscripten glue + d.ts, no .wasm (gitignored)
+dist/                 # esm bundle: index.js + renderer.js + ink.wasm + d.ts
+dist/umd/             # umd bundle: index.js + renderer.js + ink_umd.wasm
+dist/legacy/          # legacy bundle: index.js only, no wasm
 ```

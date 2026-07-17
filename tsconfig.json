@@ -15,5 +15,12 @@
     "noEmit": true,
     "outDir": "dist"
   },
-  "include": ["src", "wasm-build/*.d.ts"]
+  "include": [
+    "src",
+    "wasm-build/*.d.ts",
+    "wasm-build-umd/*.d.ts",
+    "wasm-build-umd/*.d.cts",
+    "wasm-build-legacy/*.d.ts",
+    "wasm-build-legacy/*.d.cts"
+  ]
 }

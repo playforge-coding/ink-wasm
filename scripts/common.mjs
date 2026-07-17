@@ -21,6 +21,44 @@ export const WASM_OUT = resolve(ROOT, "wasm-build");
 /** The wasm_cc_binary Bazel target inside the ink checkout. */
 export const BAZEL_TARGET = "//wasm:ink_wasm";
 
+/**
+ * The three Emscripten glue variants built from the same C++ source (see
+ * wasm-src/BUILD.bazel). Each is collected into its own directory so Rslib
+ * can bundle them into separate outputs (ESM, UMD, and the wasm-free legacy
+ * fallback).
+ */
+export const WASM_VARIANTS = [
+  {
+    name: "esm",
+    bazelTarget: "//wasm:ink_wasm",
+    // Basename of the underlying cc_binary (see wasm-src/BUILD.bazel) —
+    // bazel names the emitted .js/.wasm after it (e.g. "ink_umd.js").
+    ccName: "ink",
+    outDir: resolve(ROOT, "wasm-build"),
+    // The ESM glue has real `export` statements (EXPORT_ES6), so a plain
+    // .js extension resolves as ESM (our package.json is "type": "module").
+    jsExt: "js",
+  },
+  {
+    name: "umd",
+    bazelTarget: "//wasm:ink_wasm_umd",
+    ccName: "ink_umd",
+    outDir: resolve(ROOT, "wasm-build-umd"),
+    // The classic-script glue is CommonJS-shaped (`module.exports = ...`).
+    // With "type": "module" in package.json, a plain .js would be parsed as
+    // ESM regardless of its actual syntax, so this needs the .cjs extension
+    // to force CommonJS parsing.
+    jsExt: "cjs",
+  },
+  {
+    name: "legacy",
+    bazelTarget: "//wasm:ink_wasm_legacy",
+    ccName: "ink_legacy",
+    outDir: resolve(ROOT, "wasm-build-legacy"),
+    jsExt: "cjs",
+  },
+];
+
 /** Pinned upstream / toolchain versions. */
 export const VERSIONS = {
   ink: process.env.INK_REF || "main",
