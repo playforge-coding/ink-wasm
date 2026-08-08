@@ -10,7 +10,7 @@ compile the core stroke pipeline to wasm, and expose it to JavaScript via Embind
 The TypeScript wrappers in `src/` are then bundled together with the Emscripten
 glue by [Rslib](https://lib.rsbuild.dev/) into three packages — ESM, UMD, and a
 wasm-free UMD fallback for legacy browsers — with TypeScript types and a choice
-of rendering backends (Canvas2D or CanvasKit/Skia).
+of rendering backends (Canvas2D, WebGL, or CanvasKit/Skia).
 
 ## Install
 
@@ -54,8 +54,8 @@ Entry points:
 
 | Import | What it is | Types |
 | --- | --- | --- |
-| `ink-wasm` | stroke engine (`createInk`) + both renderers (`dist/index.js` + `dist/ink.wasm`) | `dist/index.d.ts` |
-| `ink-wasm/renderer` | Canvas2D + CanvasKit rendering backends only, no wasm (`dist/renderer.js`) | `dist/renderer.d.ts` |
+| `ink-wasm` | stroke engine (`createInk`) + all three renderers (`dist/index.js` + `dist/ink.wasm`) | `dist/index.d.ts` |
+| `ink-wasm/renderer` | Canvas2D + WebGL + CanvasKit rendering backends only, no wasm (`dist/renderer.js`) | `dist/renderer.d.ts` |
 | `ink-wasm/ink.wasm` | the raw wasm binary (for bundler URL/asset handling) | — |
 | `ink-wasm/umd` | same API as `ink-wasm`, as a UMD bundle (`dist/umd/index.js` + `dist/umd/ink_umd.wasm`) — for a plain `<script>` tag, CommonJS `require()`, or AMD, instead of ES modules | `dist/index.umd.d.ts` |
 | `ink-wasm/umd/renderer` | renderer-only UMD bundle, no wasm (`dist/umd/renderer.js`) | `dist/renderer.d.ts` |
@@ -90,9 +90,15 @@ The rest of this document covers **building the wasm from source**.
 ## Requirements
 
 - **Node.js** 18+
-- **Bazel** (or `bazelisk`) on `PATH` — the build is driven through Google Ink's
-  own Bazel setup
-- **git**
+- **`bazelisk`** on `PATH` (recommended) — the build is driven through Google
+  Ink's own Bazel setup, and bazelisk downloads the exact version ink needs
+  (**Bazel 8.7.0**, pinned into `ink/.bazelversion` by `pnpm setup`). A plain
+  `bazel` works only if it already is that version: ink ships a Bazel 8
+  lockfile that Bazel 7 refuses to read. Point the build at a specific binary
+  with `BAZEL=/path/to/bazel`. (`mise.toml` pins 8.7.0 for [mise](https://mise.jdx.dev)
+  users; the build refuses to run against a mismatched major rather than
+  failing later on an unreadable lockfile.)
+- **git** — Google Ink is a **submodule**, pinned to a known-good revision
 - A C/C++ host toolchain (Google Ink registers its own LLVM toolchain; Bazel
   still needs basics)
 
@@ -102,21 +108,44 @@ Emscripten itself is **downloaded by Bazel** (via the `emsdk` module) — you do
 ## Usage
 
 ```bash
+git clone --recurse-submodules https://github.com/playforge-coding/ink-wasm.git
+# already cloned without it: git submodule update --init --depth 1 ink
+
 pnpm install
-pnpm setup        # clone Google Ink, register emsdk, stage the //wasm targets
+pnpm setup        # check out the ink submodule, register emsdk, stage the //wasm targets
 pnpm build:wasm   # bazel build -> wasm-build*/ink.{js,cjs} + .wasm + .d.ts (x3 variants)
 pnpm build:js     # rslib bundle -> dist/, dist/umd/, dist/legacy/
 pnpm test         # run the pipeline in Node against the built ESM bundle
 ```
 
-`pnpm build` runs all three build steps in order (cloning + patching ink first
-if needed). The first build downloads the Emscripten toolchain plus the
+`pnpm build` runs all three build steps in order (checking out + patching ink
+first if needed). The first build downloads the Emscripten toolchain plus the
 abseil/protobuf dependency tree, so it takes a while; subsequent builds are
 incremental — `build:wasm` compiles three variants (ESM, UMD, wasm-free
 legacy) from the same C++ source in one `bazel build` invocation, sharing
 cached compilation of the ink/abseil/skia dependency tree, so adding the UMD
 and legacy variants costs one extra link step each, not a full rebuild.
-`pnpm clean` removes `dist/`, all `wasm-build*/` dirs and the `ink/` checkout.
+`pnpm clean` removes `dist/` and all `wasm-build*/` dirs, and resets the `ink/`
+submodule (`git checkout` + `git clean -xfd` inside it) rather than deleting it.
+
+### The ink submodule
+
+`ink/` is a git submodule pinned to one upstream revision, so every checkout
+builds the exact Google Ink tree this package was tested against — upstream
+`main` moves, and has changed the Bazel version it requires mid-stream. To bump
+it:
+
+```bash
+git -C ink fetch --depth 1 origin main && git -C ink checkout FETCH_HEAD
+pnpm clean && pnpm build      # re-apply the patches, rebuild, confirm it works
+git add ink && git commit -m "bump ink"
+```
+
+`pnpm setup` and `pnpm build:wasm` write inside the submodule (`.bazelversion`,
+the `MODULE.bazel` patch, `wasm/`, the Bazel lockfile), so its working tree is
+dirty by design; `.gitmodules` sets `ignore = dirty` so only the pinned revision
+is tracked. Setting `INK_REF=<ref>` checks out another upstream ref for a
+one-off test without moving the pin.
 
 ### Browser demo
 
@@ -127,28 +156,36 @@ pnpm serve        # copies dist/ into examples/ and serves it
 Open `http://localhost:3000/index.html`.
 
 Draw with the mouse — strokes are meshed by Google Ink in wasm and rendered to a
-canvas. Two demos are provided:
+canvas. Four demos are provided:
 
 - `examples/index.html` — renders with **Canvas2D** (zero dependencies).
+- `examples/webgl.html` — renders with **WebGL** (zero dependencies), one
+  `drawElements` per stroke; accumulates strokes and reports frame time.
 - `examples/canvaskit.html` — renders with **CanvasKit** (Skia compiled to wasm),
   using Skia's antialiased GPU `drawVertices`.
+- `examples/paint.html` — a fuller paint app (palette, brushes, undo, save PNG)
+  on Canvas2D.
 
 ## What the scripts do
 
 ### `scripts/setup.mjs`
-1. Shallow-clones Google Ink into `./ink` (skipped if present).
-2. Pins Bazel 7 via `ink/.bazelversion`.
+1. Checks out the pinned `ink` submodule (`git submodule update --init --depth 1`,
+   skipped if already present).
+2. Pins Bazel 8.7.0 — the version ink's lockfile and CI require — via
+   `ink/.bazelversion`, which `bazelisk` honors.
 3. Appends an `emsdk` `bazel_dep` (+ a single-version abseil override) to
    `ink/MODULE.bazel` (idempotent, marked with comment fences).
 4. Stages the `//wasm` Bazel package (`wasm-src/BUILD.bazel`,
    `wasm-src/bindings.cc`) into `ink/wasm/`.
 
-Env: `INK_REF` (default `main`), `EMSDK_VERSION` (default `5.0.7`),
-`BAZEL_VERSION` (default `7.4.1`).
+Env: `INK_REF` (default: the pinned submodule revision), `EMSDK_VERSION`
+(default `5.0.7`), `BAZEL_VERSION` (default `8.7.0`).
 
 ### `scripts/build-wasm.mjs`
-1. Runs a single `bazel build -c opt //wasm:ink_wasm //wasm:ink_wasm_umd //wasm:ink_wasm_legacy`
-   inside `./ink`.
+1. Runs a single `bazel build -c opt --lockfile_mode=update //wasm:ink_wasm //wasm:ink_wasm_umd //wasm:ink_wasm_legacy`
+   inside `./ink`. (ink's `.bazelrc` pins `--lockfile_mode=error`; the `emsdk`
+   `bazel_dep` setup.mjs adds is by definition missing from ink's checked-in
+   lockfile, so the build overrides it to `update`.)
 2. For each of the three variants, copies its emitted `.js`/`.wasm` from
    `bazel-bin` into its own `./wasm-build*` directory, normalizing the main
    glue file to `ink.js` (ESM) or `ink.cjs` (UMD/legacy — see "How it builds").
@@ -201,7 +238,8 @@ Only the **stroke-geometry core** is compiled into wasm: the input → brush →
 stroke → mesh pipeline, which produces GPU-ready vertex/index buffers directly.
 Google Ink's native C++ `rendering` module depends on Skia and is not compiled
 here; instead, rendering is done on the JS side, where you can feed the mesh to
-Canvas2D **or to Skia via CanvasKit** (see backends below).
+Canvas2D, **straight to the GPU via WebGL, or to Skia via CanvasKit** (see
+backends below).
 
 ## JS API
 
@@ -231,15 +269,22 @@ Full TypeScript declarations ship in `dist/`, so the import is fully typed.
 
 ### Rendering backends
 
-Both backends implement the same interface, so you can swap renderers without
-touching your stroke logic. They live behind the `ink-wasm/renderer` subpath too
-(no wasm) for callers that bring their own geometry:
+All three backends implement the same interface, so you can swap renderers
+without touching your stroke logic. They live behind the `ink-wasm/renderer`
+subpath too (no wasm) for callers that bring their own geometry:
 
 ```js
-import { createCanvas2dBackend, createCanvasKitBackend } from "ink-wasm/renderer";
+import {
+  createCanvas2dBackend,
+  createWebglBackend,
+  createCanvasKitBackend,
+} from "ink-wasm/renderer";
 
 // Canvas2D — zero dependencies:
 const backend = createCanvas2dBackend(canvas);
+
+// or WebGL — zero dependencies, one drawElements call per stroke:
+const backend = createWebglBackend(canvas, { background: { r: 1, g: 1, b: 1, a: 1 } });
 
 // or CanvasKit (Skia/wasm) — pass an initialized CanvasKit instance:
 //   const CanvasKit = await CanvasKitInit({ locateFile: ... });
@@ -250,6 +295,22 @@ backend.clear();
 backend.drawMesh(mesh, color);   // mesh from ink.generateStrokeMesh(...)
 backend.present();               // flush (no-op for Canvas2D)
 ```
+
+Which one to pick:
+
+| Backend | Deps | Antialiasing | Notes |
+| --- | --- | --- | --- |
+| `createCanvas2dBackend` | none | none (visible triangle seams) | simplest; CPU-bound on large drawings |
+| `createWebglBackend` | none | MSAA only (context `antialias`) | uploads the mesh as-is and draws it on the GPU; scales to hundreds of thousands of triangles per frame |
+| `createCanvasKitBackend` | CanvasKit (~6 MB wasm) | full, Skia-quality | matches what Google Ink renders with natively |
+
+`createWebglBackend` creates its own context (WebGL2, falling back to WebGL1)
+unless you hand it one via `gl`, which also lets it share a context with your
+own rendering — it sets the pipeline state it needs on every draw rather than
+assuming it owns the context. The drawing buffer is preserved and premultiplied,
+so strokes accumulate across frames like Canvas2D and `canvas.toDataURL()`
+captures what's on screen. Context loss is handled: draws are dropped while the
+context is gone and the program/buffers are rebuilt when it is restored.
 
 `createCanvasKitBackend` takes an already-initialized CanvasKit so it stays
 environment-agnostic; load CanvasKit from the `canvaskit-wasm` npm package or a
@@ -278,14 +339,15 @@ src/
   ink.umd.ts          # typed wrapper around the UMD wasm module
   ink.legacy.ts       # typed wrapper around the asm.js module
   ink-types.ts        # shared types (Ink, StrokeMesh, InitOptions, ...)
-  renderer.ts         # Canvas2D + CanvasKit (Skia) rendering backends
+  renderer.ts         # Canvas2D + WebGL + CanvasKit (Skia) rendering backends
   locate.ts           # ESM-only default wasm URL resolution (import.meta.url)
 examples/
   node-test.mjs       # Node smoke test
   index.html          # browser drawing demo (Canvas2D)
+  webgl.html          # browser drawing demo (WebGL)
   canvaskit.html      # browser drawing demo (CanvasKit / Skia)
   paint.html          # fuller paint app demo (Canvas2D)
-ink/                  # cloned Google Ink (gitignored)
+ink/                  # Google Ink (git submodule, pinned revision)
 wasm-build/           # ESM Emscripten glue + .wasm + d.ts (gitignored)
 wasm-build-umd/       # UMD Emscripten glue + .wasm + d.ts (gitignored)
 wasm-build-legacy/    # asm.js Emscripten glue + d.ts, no .wasm (gitignored)

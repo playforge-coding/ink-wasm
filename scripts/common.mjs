@@ -9,7 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 /** Absolute path to the package root. */
 export const ROOT = resolve(__dirname, "..");
 
-/** The Google Ink checkout, cloned and patched by setup.mjs. */
+/** The Google Ink checkout: a git submodule pinned in .gitmodules, patched by setup.mjs. */
 export const INK_DIR = resolve(ROOT, "ink");
 
 /** Hand-written Bazel package + Embind bindings staged into the ink checkout. */
@@ -59,12 +59,19 @@ export const WASM_VARIANTS = [
   },
 ];
 
-/** Pinned upstream / toolchain versions. */
+/**
+ * Pinned upstream / toolchain versions.
+ *
+ * The ink revision is NOT listed here: it is pinned by the `ink` git submodule
+ * (see .gitmodules), so there is exactly one place to bump it. Setting INK_REF
+ * overrides that pin by checking out another ref inside the submodule — for
+ * trying a newer upstream, not for normal builds.
+ */
 export const VERSIONS = {
-  ink: process.env.INK_REF || "main",
   emsdk: process.env.EMSDK_VERSION || "5.0.7",
-  // ink targets Bazel 7; Bazel 8+ removed native rules its toolchain deps use.
-  bazel: process.env.BAZEL_VERSION || "7.4.1",
+  // ink ships a Bazel 8 lockfile (lockFileVersion 24) and its CI runs 8.7.0;
+  // Bazel 7 cannot even read that lockfile.
+  bazel: process.env.BAZEL_VERSION || "8.7.0",
 };
 
 /**
@@ -85,24 +92,39 @@ export function run(cmd, args, opts = {}) {
   }
 }
 
-/** True if `bin --version` exits 0. */
-function which(bin) {
-  return spawnSync(bin, ["--version"], { stdio: "ignore" }).status === 0;
+/** `bin --version` output ("bazel 8.7.0"), or null if the binary isn't runnable. */
+function versionOf(bin) {
+  const res = spawnSync(bin, ["--version"], { encoding: "utf8" });
+  return res.status === 0 ? res.stdout.trim() : null;
 }
 
 /**
- * Pick the Bazel launcher. Prefer bazelisk: it honors ink/.bazelversion and
- * fetches the pinned Bazel 7 (Bazel 8+ removed native rules ink still uses).
+ * Pick the Bazel launcher. Prefer bazelisk: it honors ink/.bazelversion (which
+ * setup.mjs writes) and downloads the exact Bazel the pinned ink revision
+ * expects. A plain `bazel` only works if it already is a matching major: ink's
+ * checked-in MODULE.bazel.lock is Bazel 8 format, and Bazel 7 refuses to read
+ * it with a message that says nothing about the real cause. Fail here instead,
+ * with instructions.
  */
 export function pickBazel() {
   if (process.env.BAZEL) return process.env.BAZEL;
-  if (which("bazelisk")) return "bazelisk";
-  if (which("bazel")) {
-    console.warn(
-      "⚠ bazelisk not found; using bazel. ink needs Bazel 7 — " +
-        "if this fails, install bazelisk or set BAZEL=path/to/bazel-7.",
+  if (versionOf("bazelisk")) return "bazelisk";
+
+  const version = versionOf("bazel");
+  if (!version) throw new Error("Neither bazelisk nor bazel found on PATH.");
+
+  const [wantMajor] = VERSIONS.bazel.split(".");
+  const gotMajor = (version.match(/(\d+)\./) || [])[1];
+  if (gotMajor !== wantMajor) {
+    throw new Error(
+      `ink needs Bazel ${VERSIONS.bazel}, but \`bazel --version\` reports ` +
+        `"${version}". Install bazelisk (it reads ink/.bazelversion and ` +
+        "fetches the right release), or point the build at a matching binary " +
+        `with BAZEL=/path/to/bazel-${VERSIONS.bazel}.`,
     );
-    return "bazel";
   }
-  throw new Error("Neither bazelisk nor bazel found on PATH.");
+  if (!version.endsWith(VERSIONS.bazel)) {
+    console.warn(`⚠ bazelisk not found; using ${version} (ink pins ${VERSIONS.bazel}).`);
+  }
+  return "bazel";
 }

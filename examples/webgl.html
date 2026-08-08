@@ -1,0 +1,137 @@
+<!doctype html>
+<!--
+  Browser demo: draw with the mouse; Google Ink generates the stroke mesh in
+  wasm and we render it with ink-wasm's WebGL backend, which uploads the mesh
+  to the GPU and draws it with one drawElements call per stroke.
+
+  Unlike examples/canvaskit.html (a single live stroke), this one keeps every
+  committed stroke and redraws the whole stack each frame — the cheapest way to
+  see what the GPU path buys you: the triangle counter climbs into the hundreds
+  of thousands while the frame time stays flat.
+
+  Run `pnpm serve` (copies the built dist/ into examples/ and serves it),
+  then open /webgl.html.
+-->
+<meta charset="utf-8" />
+<title>Google Ink — WebGL backend</title>
+<style>
+  body {
+    font: 14px system-ui;
+    margin: 20px;
+  }
+  canvas {
+    border: 1px solid #ccc;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  #status {
+    font-variant-numeric: tabular-nums;
+  }
+  button {
+    font: inherit;
+  }
+</style>
+<h1>Google Ink + WebGL</h1>
+<p id="status">loading wasm…</p>
+<canvas id="c" width="800" height="500"></canvas>
+<p><button id="clear">Clear</button></p>
+
+<script type="module">
+  import { createInk, createWebglBackend } from "./dist/index.js";
+
+  const status = document.getElementById("status");
+  const canvas = document.getElementById("c");
+
+  const ink = await createInk();
+  const backend = createWebglBackend(canvas, {
+    background: { r: 1, g: 1, b: 1, a: 1 },
+  });
+  status.textContent = ink.version() + " — drawing via WebGL";
+
+  const STROKE_COLOR = { r: 0.1, g: 0.4, b: 0.9, a: 0.85 };
+
+  // Committed strokes, each with its cached mesh; only the live stroke is
+  // re-meshed as the pointer moves.
+  const strokes = [];
+  let points = [];
+  let t0 = 0;
+  let drawing = false;
+
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  function meshFor(pts) {
+    return ink.generateStrokeMesh(
+      pts,
+      "pressure_pen",
+      STROKE_COLOR.r,
+      STROKE_COLOR.g,
+      STROKE_COLOR.b,
+      STROKE_COLOR.a,
+      6,
+      0.1,
+    );
+  }
+
+  // Repaint everything: committed strokes bottom-up, then the live one.
+  function render(liveMesh = null) {
+    const start = performance.now();
+    backend.clear();
+    for (const m of strokes) backend.drawMesh(m, STROKE_COLOR);
+    if (liveMesh) backend.drawMesh(liveMesh, STROKE_COLOR);
+    backend.present();
+    const ms = performance.now() - start;
+
+    let tris = strokes.reduce((n, m) => n + m.triangleCount, 0);
+    if (liveMesh) tris += liveMesh.triangleCount;
+    status.textContent =
+      `${strokes.length + (liveMesh ? 1 : 0)} strokes · ` +
+      `${tris.toLocaleString()} triangles · ${ms.toFixed(2)} ms/frame (WebGL)`;
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    drawing = true;
+    canvas.setPointerCapture(e.pointerId);
+    points = [];
+    t0 = performance.now();
+    const p = pos(e);
+    points.push({ x: p.x, y: p.y, t: 0, pressure: e.pressure || 0.5 });
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (!drawing) return;
+    const p = pos(e);
+    points.push({
+      x: p.x,
+      y: p.y,
+      t: (performance.now() - t0) / 1000,
+      pressure: e.pressure || 0.5,
+    });
+    if (points.length < 2) return;
+    const mesh = meshFor(points);
+    if (mesh) render(mesh);
+  });
+
+  function finishStroke() {
+    if (!drawing) return;
+    drawing = false;
+    if (points.length >= 2) {
+      const mesh = meshFor(points);
+      if (mesh) strokes.push(mesh);
+    }
+    points = [];
+    render();
+  }
+
+  canvas.addEventListener("pointerup", finishStroke);
+  canvas.addEventListener("pointercancel", finishStroke);
+
+  document.getElementById("clear").addEventListener("click", () => {
+    strokes.length = 0;
+    render();
+  });
+
+  render();
+</script>

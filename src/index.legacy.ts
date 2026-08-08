@@ -4,5 +4,5 @@
 export { createInk } from "./ink.legacy.js";
 export type { Ink, StrokeMesh, StrokeInputPoint, BrushName, InitOptions } from "./ink-types.js";
 
-export { createCanvas2dBackend, createCanvasKitBackend } from "./renderer.js";
-export type { InkBackend, InkColor, CanvasKitBackendOptions } from "./renderer.js";
+export { createCanvas2dBackend, createWebglBackend, createCanvasKitBackend } from "./renderer.js";
+export type { InkBackend, InkColor, WebglBackendOptions, CanvasKitBackendOptions } from "./renderer.js";

@@ -1,0 +1,6 @@
+# Optional convenience for mise users: put the Bazel version Google Ink's
+# checked-in lockfile requires on PATH inside this repo. Keep in sync with
+# VERSIONS.bazel in scripts/common.mjs (which writes ink/.bazelversion).
+# bazelisk users don't need this file — it reads .bazelversion itself.
+[tools]
+bazel = "8.7.0"
