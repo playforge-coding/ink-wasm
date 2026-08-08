@@ -1,34 +1,40 @@
 {
   "name": "ink-wasm",
   "version": "0.1.1",
-  "description": "Google Ink (freehand stroke generation) compiled to WebAssembly, bundled with Rslib, with TypeScript types and Canvas2D / WebGL / CanvasKit (Skia) rendering backends.",
-  "type": "module",
+  "description": "Google Ink (freehand stroke generation) compiled to WebAssembly, bundled with tsdown, with TypeScript types and Canvas2D / WebGL / CanvasKit (Skia) rendering backends.",
+  "keywords": [
+    "canvas",
+    "canvaskit",
+    "drawing",
+    "freehand",
+    "google-ink",
+    "handwriting",
+    "ink",
+    "mesh",
+    "skia",
+    "stroke",
+    "stylus",
+    "wasm",
+    "webassembly",
+    "webgl"
+  ],
+  "homepage": "https://github.com/playforge-coding/ink-wasm#readme",
+  "bugs": {
+    "url": "https://github.com/playforge-coding/ink-wasm/issues"
+  },
   "license": "Apache-2.0",
   "author": "playforge-coding",
-  "homepage": "https://github.com/playforge-coding/ink-wasm#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/playforge-coding/ink-wasm.git"
   },
-  "bugs": {
-    "url": "https://github.com/playforge-coding/ink-wasm/issues"
-  },
-  "keywords": [
-    "ink",
-    "google-ink",
-    "wasm",
-    "webassembly",
-    "stroke",
-    "freehand",
-    "handwriting",
-    "drawing",
-    "stylus",
-    "canvas",
-    "webgl",
-    "canvaskit",
-    "skia",
-    "mesh"
+  "files": [
+    "dist"
   ],
+  "type": "module",
+  "sideEffects": false,
+  "unpkg": "./dist/umd/index.js",
+  "jsdelivr": "./dist/umd/index.js",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -45,23 +51,13 @@
     "./ink.wasm": "./dist/ink.wasm",
     "./package.json": "./package.json"
   },
-  "unpkg": "./dist/umd/index.js",
-  "jsdelivr": "./dist/umd/index.js",
-  "files": [
-    "dist"
-  ],
-  "sideEffects": false,
-  "engines": {
-    "node": ">=18"
-  },
-  "packageManager": "pnpm@11.5.2",
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "build:wasm": "node scripts/build-wasm.mjs",
-    "build:js": "rslib build",
+    "build:js": "vp pack && node scripts/build-legacy.mjs",
     "build": "node scripts/build.mjs",
     "test": "node scripts/test.mjs",
     "serve": "cd examples && cp -r ../dist ./ && pnpm dlx serve",
@@ -69,8 +65,12 @@
     "prepublishOnly": "node -e \"const fs=require('fs');for(const f of ['dist/index.js','dist/index.d.ts','dist/ink.wasm','dist/umd/index.js','dist/umd/ink_umd.wasm','dist/legacy/index.js'])fs.accessSync(f);console.log('dist artifacts present')\""
   },
   "devDependencies": {
-    "@rslib/core": "^0.18.0",
     "@types/node": "^25.9.3",
-    "typescript": "^5.9.0"
-  }
+    "typescript": "^5.9.0",
+    "vite-plus": "^0.2.8"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "pnpm@11.5.2"
 }

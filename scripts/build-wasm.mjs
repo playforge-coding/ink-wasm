@@ -4,7 +4,7 @@
 // Runs a single `bazel build` for all three wasm_cc_binary targets inside the
 // ink checkout (using the emscripten toolchain registered by setup.mjs), then
 // copies each variant's emitted .js/.wasm into its own wasm-build* directory,
-// where Rslib picks them up (rslib.config.ts). See WASM_VARIANTS in
+// where tsdown picks them up (vite.config.ts). See WASM_VARIANTS in
 // common.mjs and wasm-src/BUILD.bazel for what each variant is for.
 //
 // Config via env vars:
@@ -12,14 +12,7 @@
 //   BAZEL_ARGS   extra args appended to the build (e.g. "--sandbox_debug")
 
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  copyFileSync,
-  readdirSync,
-  statSync,
-  rmSync,
-} from "node:fs";
+import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { INK_DIR, WASM_SRC, WASM_VARIANTS, pickBazel } from "./common.mjs";
 
@@ -116,4 +109,4 @@ for (const variant of WASM_VARIANTS) {
   collectVariant(bazel, variant);
   console.log(`✓ Wrote ${variant.name} glue to ${variant.outDir}\n`);
 }
-console.log("Next: rslib build  (or `pnpm build:js`)");
+console.log("Next: vp pack  (or `pnpm build:js`)");

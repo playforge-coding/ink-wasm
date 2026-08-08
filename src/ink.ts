@@ -1,7 +1,7 @@
 // Typed, ergonomic wrapper around the Google Ink WebAssembly module.
 //
 // The Emscripten glue (../wasm-build/ink.js) and its .wasm are bundled in by
-// Rslib; the public API surface is declared here so the emitted declarations
+// tsdown; the public API surface is declared here so the emitted declarations
 // stay self-contained (they must not reference ../wasm-build, which ships only
 // inside the bundle).
 import createInkModule from "../wasm-build/ink.js";

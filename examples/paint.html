@@ -212,11 +212,7 @@
         align-items: center;
         justify-content: center;
         padding: 24px;
-        background: repeating-conic-gradient(
-            #00000010 0% 25%,
-            transparent 0% 50%
-          )
-          50% / 24px 24px;
+        background: repeating-conic-gradient(#00000010 0% 25%, transparent 0% 50%) 50% / 24px 24px;
       }
       canvas {
         background: #ffffff;
@@ -464,8 +460,7 @@
           b.innerHTML = `<span><span class="name">${br.name}</span><span class="desc">${br.desc}</span></span>`;
           b.addEventListener("click", () => {
             state.brush = br.id;
-            for (const el of host.children)
-              el.setAttribute("aria-pressed", "false");
+            for (const el of host.children) el.setAttribute("aria-pressed", "false");
             b.setAttribute("aria-pressed", "true");
             updatePreview();
           });
