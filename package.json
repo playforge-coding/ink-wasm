@@ -1,7 +1,7 @@
 {
   "name": "ink-wasm",
   "version": "0.1.1",
-  "description": "Google Ink (freehand stroke generation) compiled to WebAssembly, bundled with Rslib, with TypeScript types and Canvas2D / CanvasKit (Skia) rendering backends.",
+  "description": "Google Ink (freehand stroke generation) compiled to WebAssembly, bundled with Rslib, with TypeScript types and Canvas2D / WebGL / CanvasKit (Skia) rendering backends.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "playforge-coding",
@@ -24,6 +24,7 @@
     "drawing",
     "stylus",
     "canvas",
+    "webgl",
     "canvaskit",
     "skia",
     "mesh"

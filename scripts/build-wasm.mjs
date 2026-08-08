@@ -33,10 +33,17 @@ function ensureSetup() {
 // it must be applied to both `build` and `info bazel-bin`.
 const COMPILATION_MODE = ["-c", "opt"];
 
+// ink's own .bazelrc pins `--lockfile_mode=error`, which is right for upstream
+// but not for us: setup.mjs adds emsdk (plus an abseil override) to
+// MODULE.bazel, so the checked-in MODULE.bazel.lock is missing those entries by
+// construction and every build would fail the up-to-date check. `update` lets
+// Bazel extend the lockfile in place inside the submodule.
+const LOCKFILE_MODE = ["--lockfile_mode=update"];
+
 function build(bazel) {
   const extra = process.env.BAZEL_ARGS ? process.env.BAZEL_ARGS.split(" ") : [];
   const targets = WASM_VARIANTS.map((v) => v.bazelTarget);
-  const args = ["build", ...COMPILATION_MODE, ...targets, ...extra];
+  const args = ["build", ...COMPILATION_MODE, ...LOCKFILE_MODE, ...targets, ...extra];
   console.log(`$ ${bazel} ${args.join(" ")}  (cwd: ${INK_DIR})`);
   execFileSync(bazel, args, { cwd: INK_DIR, stdio: "inherit" });
 }
@@ -45,7 +52,7 @@ function build(bazel) {
 // config-specific path, so it MUST be passed the same `-c opt` as the build or
 // it points at the wrong (empty) k8-fastbuild directory.
 function bazelBin(bazel) {
-  return execFileSync(bazel, ["info", "bazel-bin", ...COMPILATION_MODE], {
+  return execFileSync(bazel, ["info", "bazel-bin", ...COMPILATION_MODE, ...LOCKFILE_MODE], {
     cwd: INK_DIR,
   })
     .toString()

@@ -12,9 +12,14 @@ export type {
   InitOptions,
 } from "./ink.js";
 
-export { createCanvas2dBackend, createCanvasKitBackend } from "./renderer.js";
+export {
+  createCanvas2dBackend,
+  createWebglBackend,
+  createCanvasKitBackend,
+} from "./renderer.js";
 export type {
   InkBackend,
   InkColor,
+  WebglBackendOptions,
   CanvasKitBackendOptions,
 } from "./renderer.js";

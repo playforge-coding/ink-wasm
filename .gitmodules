@@ -1,0 +1,6 @@
+[submodule "ink"]
+	path = ink
+	url = https://github.com/google/ink.git
+	shallow = true
+	ignore = dirty
+	branch = main

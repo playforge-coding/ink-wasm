@@ -5,8 +5,10 @@
 //
 // This module turns that geometry into pixels. Every backend implements the
 // same small InkBackend interface so callers can swap renderers without
-// touching their input/stroke logic. Two backends are provided:
+// touching their input/stroke logic. Three backends are provided:
 //   - createCanvas2dBackend  — fills triangles on a 2D canvas (zero deps).
+//   - createWebglBackend     — uploads the mesh straight to the GPU and draws
+//     it with `drawElements` (zero deps, WebGL2 or WebGL1).
 //   - createCanvasKitBackend — draws via CanvasKit (Skia compiled to wasm),
 //     using Skia's antialiased GPU `drawVertices`, the same renderer Google
 //     Ink itself targets natively.
@@ -22,8 +24,8 @@ export interface InkColor {
 
 /**
  * A rendering backend. Implementations turn a {@link StrokeMesh} into pixels;
- * the interface is identical across Canvas2D and CanvasKit so callers can swap
- * renderers freely.
+ * the interface is identical across Canvas2D, WebGL and CanvasKit so callers
+ * can swap renderers freely.
  */
 export interface InkBackend {
   /** Erase the current frame. */
@@ -68,6 +70,264 @@ export function createCanvas2dBackend(canvas: HTMLCanvasElement): InkBackend {
     },
     present() {},
     dispose() {},
+  };
+}
+
+export interface WebglBackendOptions {
+  /** Clear color; defaults to transparent. */
+  background?: InkColor;
+  /**
+   * Draw into an existing context instead of creating one. Must belong to
+   * `canvas`. The caller keeps ownership: `dispose()` frees the backend's own
+   * program and buffers but leaves the context alive.
+   */
+  gl?: WebGLRenderingContext | WebGL2RenderingContext;
+  /** Multisample the drawing buffer; defaults to true. Ignored if `gl` is given. */
+  antialias?: boolean;
+  /**
+   * Extra `getContext` attributes, merged over the defaults
+   * (`alpha`, `antialias`, `premultipliedAlpha` and `preserveDrawingBuffer`
+   * are all on). Ignored if `gl` is given.
+   */
+  contextAttributes?: WebGLContextAttributes;
+}
+
+// Mesh coordinates are canvas pixels with y pointing down; clip space is
+// [-1, 1] with y pointing up. GLSL ES 1.00 so the same source compiles on both
+// WebGL1 and WebGL2.
+const WEBGL_VERTEX_SHADER = `
+attribute vec2 a_position;
+uniform vec2 u_resolution;
+void main() {
+  vec2 clip = a_position / u_resolution * 2.0 - 1.0;
+  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+}`;
+
+// Premultiplied output, to match the canvas's premultiplied compositing and the
+// ONE / ONE_MINUS_SRC_ALPHA blend the backend sets up.
+const WEBGL_FRAGMENT_SHADER = `
+precision mediump float;
+uniform vec4 u_color;
+void main() {
+  gl_FragColor = vec4(u_color.rgb * u_color.a, u_color.a);
+}`;
+
+/** Everything the backend allocates on the context; rebuilt after context loss. */
+interface WebglResources {
+  program: WebGLProgram;
+  shaders: WebGLShader[];
+  positionBuffer: WebGLBuffer;
+  indexBuffer: WebGLBuffer;
+  positionLoc: number;
+  resolutionLoc: WebGLUniformLocation | null;
+  colorLoc: WebGLUniformLocation | null;
+  /** Allocated size of each buffer, in bytes; grown on demand. */
+  vertexCapacity: number;
+  indexCapacity: number;
+}
+
+/**
+ * WebGL backend: uploads the mesh's vertex/index arrays to the GPU and draws
+ * them with a single `drawElements` call per stroke. No dependencies (unlike
+ * CanvasKit) and far faster than Canvas2D on large meshes, but the triangles
+ * are drawn without antialiasing beyond whatever MSAA the context provides.
+ *
+ * The mesh is consumed in canvas-pixel coordinates, exactly like the other
+ * backends — the shader maps them to clip space using the drawing buffer size,
+ * so resizing the canvas needs no extra call.
+ *
+ * @param canvas The target canvas element.
+ */
+export function createWebglBackend(
+  canvas: HTMLCanvasElement,
+  opts: WebglBackendOptions = {},
+): InkBackend {
+  const attributes: WebGLContextAttributes = {
+    alpha: true,
+    antialias: opts.antialias ?? true,
+    premultipliedAlpha: true,
+    // Canvas2D-like semantics: the drawing survives compositing, so callers can
+    // draw incrementally and `canvas.toDataURL()` captures what's on screen.
+    preserveDrawingBuffer: true,
+    ...opts.contextAttributes,
+  };
+
+  const context =
+    opts.gl ??
+    canvas.getContext("webgl2", attributes) ??
+    canvas.getContext("webgl", attributes);
+  if (!context) throw new Error("WebGL: getContext('webgl') returned null");
+  // Re-bind through a non-nullable declaration: the helpers and the returned
+  // methods below all close over it, and TS doesn't carry a narrowing that far.
+  const gl: WebGLRenderingContext | WebGL2RenderingContext = context;
+
+  // WebGL2 indexes with 32-bit integers natively; WebGL1 needs an extension.
+  // Without either we narrow to 16-bit indices, which stroke meshes fit into
+  // comfortably (see the vertex-count guard in drawMesh).
+  const uint32Indices =
+    typeof WebGL2RenderingContext !== "undefined" &&
+    gl instanceof WebGL2RenderingContext
+      ? true
+      : !!gl.getExtension("OES_element_index_uint");
+  // Scratch buffer for the 16-bit fallback, grown as needed.
+  let narrowIndices: Uint16Array | null = null;
+
+  const bg = opts.background ?? { r: 0, g: 0, b: 0, a: 0 };
+
+  function compile(type: number, source: string): WebGLShader {
+    const shader = gl.createShader(type);
+    if (!shader) throw new Error("WebGL: could not create shader");
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      const log = gl.getShaderInfoLog(shader);
+      gl.deleteShader(shader);
+      throw new Error(`WebGL: shader compilation failed: ${log}`);
+    }
+    return shader;
+  }
+
+  function createResources(): WebglResources {
+    const vs = compile(gl.VERTEX_SHADER, WEBGL_VERTEX_SHADER);
+    const fs = compile(gl.FRAGMENT_SHADER, WEBGL_FRAGMENT_SHADER);
+    const program = gl.createProgram();
+    if (!program) throw new Error("WebGL: could not create program");
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      const log = gl.getProgramInfoLog(program);
+      throw new Error(`WebGL: program link failed: ${log}`);
+    }
+
+    const positionBuffer = gl.createBuffer();
+    const indexBuffer = gl.createBuffer();
+    if (!positionBuffer || !indexBuffer) {
+      throw new Error("WebGL: could not create buffers");
+    }
+
+    return {
+      program,
+      shaders: [vs, fs],
+      positionBuffer,
+      indexBuffer,
+      positionLoc: gl.getAttribLocation(program, "a_position"),
+      resolutionLoc: gl.getUniformLocation(program, "u_resolution"),
+      colorLoc: gl.getUniformLocation(program, "u_color"),
+      vertexCapacity: 0,
+      indexCapacity: 0,
+    };
+  }
+
+  let res: WebglResources | null = createResources();
+
+  // A lost context invalidates every object above. Cancelling the event is what
+  // lets the browser hand us a fresh context, at which point we rebuild them;
+  // in between, draw calls are dropped rather than throwing.
+  const onContextLost = (e: Event) => {
+    e.preventDefault();
+    res = null;
+    narrowIndices = null;
+  };
+  const onContextRestored = () => {
+    res = createResources();
+  };
+  canvas.addEventListener("webglcontextlost", onContextLost);
+  canvas.addEventListener("webglcontextrestored", onContextRestored);
+
+  /** Re-upload `data`, growing the buffer's allocation only when it must. */
+  function upload(
+    target: number,
+    buffer: WebGLBuffer,
+    data: ArrayBufferView,
+    capacity: number,
+  ): number {
+    gl.bindBuffer(target, buffer);
+    if (data.byteLength > capacity) {
+      gl.bufferData(target, data, gl.DYNAMIC_DRAW);
+      return data.byteLength;
+    }
+    gl.bufferSubData(target, 0, data);
+    return capacity;
+  }
+
+  return {
+    clear() {
+      if (!res) return;
+      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+      // The drawing buffer is premultiplied, so premultiply the clear color too.
+      gl.clearColor(bg.r * bg.a, bg.g * bg.a, bg.b * bg.a, bg.a);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    },
+    drawMesh(mesh, { r, g, b, a }) {
+      if (!res || mesh.indices.length === 0) return;
+
+      let indices: ArrayBufferView = mesh.indices;
+      let indexType: GLenum = gl.UNSIGNED_INT;
+      if (!uint32Indices) {
+        if (mesh.vertexCount > 65535) {
+          throw new Error(
+            `WebGL: mesh has ${mesh.vertexCount} vertices, exceeds this ` +
+              `context's 16-bit index limit (65535) — WebGL2 or the ` +
+              `OES_element_index_uint extension is required for more`,
+          );
+        }
+        if (!narrowIndices || narrowIndices.length < mesh.indices.length) {
+          narrowIndices = new Uint16Array(mesh.indices.length);
+        }
+        narrowIndices.set(mesh.indices);
+        // `set` leaves any tail from a previous, longer mesh in place; the draw
+        // call below only reads the first mesh.indices.length entries.
+        indices = narrowIndices.subarray(0, mesh.indices.length);
+        indexType = gl.UNSIGNED_SHORT;
+      }
+
+      res.vertexCapacity = upload(
+        gl.ARRAY_BUFFER,
+        res.positionBuffer,
+        mesh.vertices,
+        res.vertexCapacity,
+      );
+      res.indexCapacity = upload(
+        gl.ELEMENT_ARRAY_BUFFER,
+        res.indexBuffer,
+        indices,
+        res.indexCapacity,
+      );
+
+      // Set the pipeline state per draw rather than once up front: the context
+      // may be shared with other rendering code that leaves it however it likes.
+      gl.useProgram(res.program);
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.CULL_FACE);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+      gl.uniform2f(
+        res.resolutionLoc,
+        gl.drawingBufferWidth,
+        gl.drawingBufferHeight,
+      );
+      gl.uniform4f(res.colorLoc, r, g, b, a);
+
+      gl.enableVertexAttribArray(res.positionLoc);
+      gl.vertexAttribPointer(res.positionLoc, 2, gl.FLOAT, false, 0, 0);
+      gl.drawElements(gl.TRIANGLES, mesh.indices.length, indexType, 0);
+    },
+    present() {
+      if (res) gl.flush();
+    },
+    dispose() {
+      canvas.removeEventListener("webglcontextlost", onContextLost);
+      canvas.removeEventListener("webglcontextrestored", onContextRestored);
+      if (!res) return;
+      gl.deleteBuffer(res.positionBuffer);
+      gl.deleteBuffer(res.indexBuffer);
+      for (const shader of res.shaders) gl.deleteShader(shader);
+      gl.deleteProgram(res.program);
+      res = null;
+      narrowIndices = null;
+    },
   };
 }
 
