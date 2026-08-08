@@ -1,6 +1,6 @@
 {
   "name": "ink-wasm",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Google Ink (freehand stroke generation) compiled to WebAssembly, bundled with tsdown, with TypeScript types and Canvas2D / WebGL / CanvasKit (Skia) rendering backends.",
   "keywords": [
     "canvas",
