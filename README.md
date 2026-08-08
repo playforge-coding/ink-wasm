@@ -8,9 +8,10 @@ Google Ink is a Bazel 7+/bzlmod C++20 project with no built-in JS bindings. The
 Node scripts in `scripts/` add an Emscripten toolchain to its Bazel build,
 compile the core stroke pipeline to wasm, and expose it to JavaScript via Embind.
 The TypeScript wrappers in `src/` are then bundled together with the Emscripten
-glue by [Rslib](https://lib.rsbuild.dev/) into three packages — ESM, UMD, and a
-wasm-free UMD fallback for legacy browsers — with TypeScript types and a choice
-of rendering backends (Canvas2D, WebGL, or CanvasKit/Skia).
+glue by [tsdown](https://tsdown.dev/) (run through
+[Vite+](https://viteplus.dev/)) into three packages — ESM, UMD, and a wasm-free
+UMD fallback for legacy browsers — with TypeScript types and a choice of
+rendering backends (Canvas2D, WebGL, or CanvasKit/Skia).
 
 ## Install
 
@@ -28,11 +29,18 @@ import { createInk, createCanvas2dBackend } from "ink-wasm";
 const ink = await createInk();
 
 const mesh = ink.generateStrokeMesh(
-  [ { x: 10, y: 10, t: 0 }, { x: 60, y: 50, t: 0.04 }, { x: 120, y: 60, t: 0.08 } ],
-  "marker",        // "marker" | "pressure_pen" | "highlighter"
-  0.1, 0.4, 0.9, 1, // rgba, 0..1
-  4,                // brush size
-  0.1,              // simplification epsilon
+  [
+    { x: 10, y: 10, t: 0 },
+    { x: 60, y: 50, t: 0.04 },
+    { x: 120, y: 60, t: 0.08 },
+  ],
+  "marker", // "marker" | "pressure_pen" | "highlighter"
+  0.1,
+  0.4,
+  0.9,
+  1, // rgba, 0..1
+  4, // brush size
+  0.1, // simplification epsilon
 );
 
 const backend = createCanvas2dBackend(canvas);
@@ -52,14 +60,14 @@ const ink = await createInk({ locateFile: (f) => `/assets/${f}` });
 
 Entry points:
 
-| Import | What it is | Types |
-| --- | --- | --- |
-| `ink-wasm` | stroke engine (`createInk`) + all three renderers (`dist/index.js` + `dist/ink.wasm`) | `dist/index.d.ts` |
-| `ink-wasm/renderer` | Canvas2D + WebGL + CanvasKit rendering backends only, no wasm (`dist/renderer.js`) | `dist/renderer.d.ts` |
-| `ink-wasm/ink.wasm` | the raw wasm binary (for bundler URL/asset handling) | — |
-| `ink-wasm/umd` | same API as `ink-wasm`, as a UMD bundle (`dist/umd/index.js` + `dist/umd/ink_umd.wasm`) — for a plain `<script>` tag, CommonJS `require()`, or AMD, instead of ES modules | `dist/index.umd.d.ts` |
-| `ink-wasm/umd/renderer` | renderer-only UMD bundle, no wasm (`dist/umd/renderer.js`) | `dist/renderer.d.ts` |
-| `ink-wasm/legacy` | same API again, but **no WebAssembly at all** — the whole engine compiled to asm.js (`dist/legacy/index.js`, no `.wasm` sibling) — for browsers that can't run wasm | `dist/index.legacy.d.ts` |
+| Import                  | What it is                                                                                                                                                                | Types                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| `ink-wasm`              | stroke engine (`createInk`) + all three renderers (`dist/index.js` + `dist/ink.wasm`)                                                                                     | `dist/index.d.ts`    |
+| `ink-wasm/renderer`     | Canvas2D + WebGL + CanvasKit rendering backends only, no wasm (`dist/renderer.js`)                                                                                        | `dist/renderer.d.ts` |
+| `ink-wasm/ink.wasm`     | the raw wasm binary (for bundler URL/asset handling)                                                                                                                      | —                    |
+| `ink-wasm/umd`          | same API as `ink-wasm`, as a UMD bundle (`dist/umd/index.js` + `dist/umd/ink_umd.wasm`) — for a plain `<script>` tag, CommonJS `require()`, or AMD, instead of ES modules | `dist/index.d.ts`    |
+| `ink-wasm/umd/renderer` | renderer-only UMD bundle, no wasm (`dist/umd/renderer.js`)                                                                                                                | `dist/renderer.d.ts` |
+| `ink-wasm/legacy`       | same API again, but **no WebAssembly at all** — the whole engine compiled to asm.js (`dist/legacy/index.js`, no `.wasm` sibling) — for browsers that can't run wasm       | `dist/index.d.ts`    |
 
 The package also sets `unpkg`/`jsdelivr` to the UMD build, so a CDN `<script>`
 tag works out of the box:
@@ -67,7 +75,9 @@ tag works out of the box:
 ```html
 <script src="https://unpkg.com/ink-wasm/dist/umd/index.js"></script>
 <script>
-  InkWasm.createInk().then((ink) => { /* ... */ });
+  InkWasm.createInk().then((ink) => {
+    /* ... */
+  });
 </script>
 ```
 
@@ -114,8 +124,9 @@ git clone --recurse-submodules https://github.com/playforge-coding/ink-wasm.git
 pnpm install
 pnpm setup        # check out the ink submodule, register emsdk, stage the //wasm targets
 pnpm build:wasm   # bazel build -> wasm-build*/ink.{js,cjs} + .wasm + .d.ts (x3 variants)
-pnpm build:js     # rslib bundle -> dist/, dist/umd/, dist/legacy/
+pnpm build:js     # vp pack (tsdown) -> dist/, dist/umd/; + dist/legacy/
 pnpm test         # run the pipeline in Node against the built ESM bundle
+vp check          # oxfmt + oxlint + type check
 ```
 
 `pnpm build` runs all three build steps in order (checking out + patching ink
@@ -169,6 +180,7 @@ canvas. Four demos are provided:
 ## What the scripts do
 
 ### `scripts/setup.mjs`
+
 1. Checks out the pinned `ink` submodule (`git submodule update --init --depth 1`,
    skipped if already present).
 2. Pins Bazel 8.7.0 — the version ink's lockfile and CI require — via
@@ -182,6 +194,7 @@ Env: `INK_REF` (default: the pinned submodule revision), `EMSDK_VERSION`
 (default `5.0.7`), `BAZEL_VERSION` (default `8.7.0`).
 
 ### `scripts/build-wasm.mjs`
+
 1. Runs a single `bazel build -c opt --lockfile_mode=update //wasm:ink_wasm //wasm:ink_wasm_umd //wasm:ink_wasm_legacy`
    inside `./ink`. (ink's `.bazelrc` pins `--lockfile_mode=error`; the `emsdk`
    `bazel_dep` setup.mjs adds is by definition missing from ink's checked-in
@@ -194,16 +207,40 @@ Env: `INK_REF` (default: the pinned submodule revision), `EMSDK_VERSION`
 
 Env: `BAZEL` (binary to use), `BAZEL_ARGS` (extra Bazel flags).
 
-### `rslib build` (`rslib.config.ts`)
-Three `lib` entries, one per bundle:
+### `vp pack` (`vite.config.ts`)
+
+Vite+ runs [tsdown](https://tsdown.dev/) from the `pack` block, which holds one
+entry per bundle:
+
 - **esm** — bundles `src/index.ts` + `src/renderer.ts` with the ESM glue into
   `dist/index.js` + `dist/renderer.js`, emits declaration files, and copies
-  `wasm-build/ink.wasm` alongside.
-- **umd** — same API (`src/index.umd.ts` + `src/renderer.ts`) bundled as UMD
-  (`umdName: "InkWasm"`) into `dist/umd/`, with the UMD glue's `.wasm` copied
-  alongside under its own name (`dist/umd/ink_umd.wasm`).
-- **legacy** — `src/index.legacy.ts` (asm.js glue, no wasm) bundled as UMD
-  into `dist/legacy/index.js`, downleveled to `es5`.
+  `wasm-build/ink.wasm` (plus `LICENSE`/`NOTICE`/`README.md`) alongside.
+- **umd** / **umd:renderer** — same API (`src/index.umd.ts`, `src/renderer.ts`)
+  bundled as UMD (`globalName: "InkWasm"`) into `dist/umd/`, with the UMD
+  glue's `.wasm` copied alongside under its own name (`dist/umd/ink_umd.wasm`).
+  Rolldown can't code-split a UMD bundle, so the two entries are separate
+  configs writing into the same `outDir`.
+
+### `node scripts/build-legacy.mjs`
+
+The wasm-free fallback (`src/index.legacy.ts` → `dist/legacy/index.js`, UMD,
+downleveled to `es2015` — oxc's floor, and the asm.js glue is already ES5) is
+**not** built by `vp pack`. Rolldown's tree-shaking miscompiles Emscripten's
+wasm2js output — the bundle loads but `abort()`s partway through the first
+stroke — and tsdown offers no way to switch tree-shaking off, so this script
+drives Rolldown (the bundler Vite+ itself runs) directly with
+`treeshake: false`, and with a `minify` that skips the `compress` pass because
+it breaks that code the same way. Fold it back into the `pack` block once
+tsdown honors `treeshake: false`.
+
+### `vp lint` / `vp fmt` / `vp check`
+
+Vite+ also drives [oxlint](https://oxc.rs/docs/guide/usage/linter) and
+[oxfmt](https://oxc.rs/docs/guide/usage/formatter) from the `lint` and `fmt`
+blocks of the same `vite.config.ts`. `vp check` runs formatting, linting and
+type checking in one pass; `vp lint --fix` and `vp fmt` write fixes. The
+generated trees (`dist/`, `wasm-build*/`, the `ink/` submodule) are excluded
+via `ignorePatterns`.
 
 ## How it builds
 
@@ -211,11 +248,11 @@ Three `lib` entries, one per bundle:
 core Ink libraries (`strokes`, `brush`, `geometry`, `color`, `types`) with the
 Embind glue in `wasm-src/bindings.cc`, differing only in Emscripten flags:
 
-| Target | Flags | Used by |
-| --- | --- | --- |
-| `ink` | `EXPORT_ES6=1`, `ENVIRONMENT=web,worker,node` | ESM bundle |
-| `ink_umd` | no `EXPORT_ES6`, `ENVIRONMENT=web,worker` | UMD bundle |
-| `ink_legacy` | same as `ink_umd`, plus `WASM=0` (asm.js) | legacy (no-wasm) bundle |
+| Target       | Flags                                         | Used by                 |
+| ------------ | --------------------------------------------- | ----------------------- |
+| `ink`        | `EXPORT_ES6=1`, `ENVIRONMENT=web,worker,node` | ESM bundle              |
+| `ink_umd`    | no `EXPORT_ES6`, `ENVIRONMENT=web,worker`     | UMD bundle              |
+| `ink_legacy` | same as `ink_umd`, plus `WASM=0` (asm.js)     | legacy (no-wasm) bundle |
 
 `EXPORT_ES6` controls whether the glue is an ES module (`import.meta.url`-based
 wasm resolution — required for the ESM bundle) or a classic-script/CommonJS
@@ -292,17 +329,17 @@ const backend = createCanvasKitBackend(CanvasKit, canvas, { background: CanvasKi
 
 const color = { r: 0.1, g: 0.4, b: 0.9, a: 0.85 };
 backend.clear();
-backend.drawMesh(mesh, color);   // mesh from ink.generateStrokeMesh(...)
-backend.present();               // flush (no-op for Canvas2D)
+backend.drawMesh(mesh, color); // mesh from ink.generateStrokeMesh(...)
+backend.present(); // flush (no-op for Canvas2D)
 ```
 
 Which one to pick:
 
-| Backend | Deps | Antialiasing | Notes |
-| --- | --- | --- | --- |
-| `createCanvas2dBackend` | none | none (visible triangle seams) | simplest; CPU-bound on large drawings |
-| `createWebglBackend` | none | MSAA only (context `antialias`) | uploads the mesh as-is and draws it on the GPU; scales to hundreds of thousands of triangles per frame |
-| `createCanvasKitBackend` | CanvasKit (~6 MB wasm) | full, Skia-quality | matches what Google Ink renders with natively |
+| Backend                  | Deps                   | Antialiasing                    | Notes                                                                                                  |
+| ------------------------ | ---------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `createCanvas2dBackend`  | none                   | none (visible triangle seams)   | simplest; CPU-bound on large drawings                                                                  |
+| `createWebglBackend`     | none                   | MSAA only (context `antialias`) | uploads the mesh as-is and draws it on the GPU; scales to hundreds of thousands of triangles per frame |
+| `createCanvasKitBackend` | CanvasKit (~6 MB wasm) | full, Skia-quality              | matches what Google Ink renders with natively                                                          |
 
 `createWebglBackend` creates its own context (WebGL2, falling back to WebGL1)
 unless you hand it one via `gl`, which also lets it share a context with your
@@ -322,11 +359,12 @@ CDN (`examples/canvaskit.html` shows the CDN path).
 scripts/
   setup.mjs           # clone + patch the ink checkout
   build-wasm.mjs      # bazel build -> wasm-build*/ (glue + .wasm + .d.ts, x3)
-  build.mjs           # setup (if needed) -> build-wasm -> rslib build
+  build.mjs           # setup (if needed) -> build-wasm -> vp pack -> build-legacy
+  build-legacy.mjs    # rolldown -> dist/legacy/ (asm.js fallback; see above)
   common.mjs          # shared paths + helpers (incl. WASM_VARIANTS)
   clean.mjs
   test.mjs
-rslib.config.ts       # 3 lib entries (esm/umd/legacy) -> dist/, dist/umd/, dist/legacy/
+vite.config.ts        # Vite+: pack (esm/umd -> dist/) + oxlint/oxfmt config
 wasm-src/             # the Bazel package staged into ink/wasm
   BUILD.bazel         # 3 cc_binary targets: ink, ink_umd, ink_legacy
   bindings.cc         # Embind bindings over the Ink stroke pipeline

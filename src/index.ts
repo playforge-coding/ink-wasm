@@ -4,19 +4,9 @@
 // Import the stroke engine and a renderer from the root, or pull in only the
 // renderers (no wasm) via the "ink-wasm/renderer" subpath.
 export { createInk } from "./ink.js";
-export type {
-  Ink,
-  StrokeMesh,
-  StrokeInputPoint,
-  BrushName,
-  InitOptions,
-} from "./ink.js";
+export type { Ink, StrokeMesh, StrokeInputPoint, BrushName, InitOptions } from "./ink.js";
 
-export {
-  createCanvas2dBackend,
-  createWebglBackend,
-  createCanvasKitBackend,
-} from "./renderer.js";
+export { createCanvas2dBackend, createWebglBackend, createCanvasKitBackend } from "./renderer.js";
 export type {
   InkBackend,
   InkColor,

@@ -74,6 +74,4 @@ export interface InkModuleOptions {
  * Instantiates the Ink WebAssembly module. The wasm is fetched/loaded lazily;
  * await the returned promise before calling any methods.
  */
-export default function createInkModule(
-  options?: InkModuleOptions,
-): Promise<InkModule>;
+export default function createInkModule(options?: InkModuleOptions): Promise<InkModule>;

@@ -23,7 +23,7 @@ export const BAZEL_TARGET = "//wasm:ink_wasm";
 
 /**
  * The three Emscripten glue variants built from the same C++ source (see
- * wasm-src/BUILD.bazel). Each is collected into its own directory so Rslib
+ * wasm-src/BUILD.bazel). Each is collected into its own directory so tsdown
  * can bundle them into separate outputs (ESM, UMD, and the wasm-free legacy
  * fallback).
  */
@@ -81,9 +81,7 @@ export const VERSIONS = {
  * @param {import('node:child_process').SpawnSyncOptions} [opts]
  */
 export function run(cmd, args, opts = {}) {
-  const printable = [cmd, ...args]
-    .map((a) => (a.includes(" ") ? JSON.stringify(a) : a))
-    .join(" ");
+  const printable = [cmd, ...args].map((a) => (a.includes(" ") ? JSON.stringify(a) : a)).join(" ");
   console.log(`\n$ ${printable}\n`);
   const res = spawnSync(cmd, args, { stdio: "inherit", cwd: ROOT, ...opts });
   if (res.error) throw res.error;

@@ -51,9 +51,7 @@ export function createCanvas2dBackend(canvas: HTMLCanvasElement): InkBackend {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     },
     drawMesh(mesh, { r, g, b, a }) {
-      ctx.fillStyle = `rgba(${(r * 255) | 0},${(g * 255) | 0},${
-        (b * 255) | 0
-      },${a})`;
+      ctx.fillStyle = `rgba(${(r * 255) | 0},${(g * 255) | 0},${(b * 255) | 0},${a})`;
       const v = mesh.vertices;
       const idx = mesh.indices;
       ctx.beginPath();
@@ -153,9 +151,7 @@ export function createWebglBackend(
   };
 
   const context =
-    opts.gl ??
-    canvas.getContext("webgl2", attributes) ??
-    canvas.getContext("webgl", attributes);
+    opts.gl ?? canvas.getContext("webgl2", attributes) ?? canvas.getContext("webgl", attributes);
   if (!context) throw new Error("WebGL: getContext('webgl') returned null");
   // Re-bind through a non-nullable declaration: the helpers and the returned
   // methods below all close over it, and TS doesn't carry a narrowing that far.
@@ -165,8 +161,7 @@ export function createWebglBackend(
   // Without either we narrow to 16-bit indices, which stroke meshes fit into
   // comfortably (see the vertex-count guard in drawMesh).
   const uint32Indices =
-    typeof WebGL2RenderingContext !== "undefined" &&
-    gl instanceof WebGL2RenderingContext
+    typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext
       ? true
       : !!gl.getExtension("OES_element_index_uint");
   // Scratch buffer for the 16-bit fallback, grown as needed.
@@ -303,11 +298,7 @@ export function createWebglBackend(
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-      gl.uniform2f(
-        res.resolutionLoc,
-        gl.drawingBufferWidth,
-        gl.drawingBufferHeight,
-      );
+      gl.uniform2f(res.resolutionLoc, gl.drawingBufferWidth, gl.drawingBufferHeight);
       gl.uniform4f(res.colorLoc, r, g, b, a);
 
       gl.enableVertexAttribArray(res.positionLoc);

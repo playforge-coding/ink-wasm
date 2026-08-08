@@ -3,12 +3,7 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 
-const dist = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "dist",
-  "index.js",
-);
+const dist = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "index.js");
 const { createInk } = await import(pathToFileURL(dist).href);
 
 const ink = await createInk();
